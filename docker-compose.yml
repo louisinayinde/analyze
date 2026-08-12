@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./back
+      dockerfile: Dockerfile.dev
+    # main:app -> back/src/main.py (créé en A6), résolu via --app-dir src
+    # pour rester cohérent avec la convention du repo (mypy_path/ruff = "src").
+    command:
+      [
+        "uv",
+        "run",
+        "uvicorn",
+        "main:app",
+        "--app-dir",
+        "src",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload"
+      ]
+    volumes:
+      - ./back:/app
+      - /app/.venv
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./back
+      dockerfile: Dockerfile.dev
+    # back/src/worker.py sera créé en EPIC F (traitement async).
+    command: ["uv", "run", "python", "src/worker.py"]
+    volumes:
+      - ./back:/app
+      - /app/.venv
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./front
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./front:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

@@ -9,3 +9,7 @@ back/__pycache__/
 *.pyc
 .mypy_cache/
 .ruff_cache/
+
+# secrets locaux — ne jamais committer
+.env
+.env.local

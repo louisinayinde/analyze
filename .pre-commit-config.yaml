@@ -8,13 +8,14 @@ repos:
       - id: ruff-format
         files: ^back/
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.0
+  - repo: local
     hooks:
       - id: mypy
-        args: [--strict]
-        files: ^back/src/
-        entry: bash -c 'cd back && uv run mypy "$@"' --
+        name: mypy (back)
+        entry: bash -c 'cd back && uv run mypy src'
+        language: system
+        files: ^back/src/.*\.py$
+        pass_filenames: false
 
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
