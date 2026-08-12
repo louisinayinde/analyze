@@ -3,16 +3,23 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from composition.registry import Registry
 from shared.config import Settings, get_settings
+from shared.correlation import CorrelationIdMiddleware
+from shared.logging import configure_logging
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_logging(settings.log_level)
 
     app = FastAPI()
     app.state.registry = Registry()
     app.state.settings = settings
 
     _configure_cors(app, settings)
+    # Ajouté après CORS pour l'englober (agents.md §3 : correlation_id
+    # propagé de bout en bout, y compris pour les réponses touchées par
+    # le middleware CORS). Voir shared/correlation.py.
+    app.add_middleware(CorrelationIdMiddleware)
 
     for router in _routers():
         app.include_router(router)
