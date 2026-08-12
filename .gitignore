@@ -1,0 +1,11 @@
+agents.md
+backlog.md
+projets.md
+
+# Python / back
+back/.venv/
+back/__pycache__/
+**/__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/

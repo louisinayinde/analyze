@@ -1,0 +1,42 @@
+[project]
+name = "analyse-moi-ca-back"
+version = "0.1.0"
+description = "API backend — Analyse-moi ça"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort (imports triés)
+    "UP",  # pyupgrade (syntaxe moderne)
+    "B",   # flake8-bugbear (bugs fréquents)
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "RUF", # règles spécifiques à ruff
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.13"
+mypy_path = "src"
+strict = true
+# Non inclus par défaut dans --strict : signale le code mort après un `return`/`raise`.
+warn_unreachable = true
