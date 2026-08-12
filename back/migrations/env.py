@@ -6,16 +6,18 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+# À chaque module qui ajoute des tables, importer ici son module de modèles
+# pour qu'il s'enregistre sur `Base.metadata` avant l'autogénération. Import
+# volontairement fait ici plutôt que via l'`index.py` du module : Alembic
+# n'a besoin que des classes SQLAlchemy, jamais de leur port/use-case.
+from modules.analyse.adaptateurs import models as _analyse_models  # noqa: F401
+from modules.auth.adaptateurs import models as _auth_models  # noqa: F401
+from modules.cache.adaptateurs import models as _cache_models  # noqa: F401
+
 # `prepend_sys_path = src` dans alembic.ini rend ces modules importables
 # (même convention que mypy_path/ruff src dans pyproject.toml).
 from shared.config import get_settings
 from shared.db import Base
-
-# À chaque module qui ajoute des tables (B6+), importer ici son module de
-# modèles (ex. `from modules.auth.adaptateurs import models as _auth_models`)
-# pour qu'il s'enregistre sur `Base.metadata` avant l'autogénération.
-# Import volontairement fait ici plutôt que via l'`index.py` du module :
-# Alembic n'a besoin que des classes SQLAlchemy, jamais de leur port/use-case.
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

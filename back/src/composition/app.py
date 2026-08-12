@@ -39,10 +39,20 @@ def create_app() -> FastAPI:
 
 
 def _configure_cors(app: FastAPI, settings: Settings) -> None:
+    # `allow_methods`/`allow_headers` grand ouverts : ce ne sont pas des
+    # frontières de sécurité (le client n'est jamais l'autorité, agents.md
+    # §7 — l'autorisation réelle se fait côté serveur, par endpoint). La
+    # seule frontière que CORS doit tenir ici est `allow_origins`, restreint
+    # à une allowlist exacte (`cors_origins_list`, jamais de wildcard).
+    # `allow_credentials=True` : requis par le refresh token en cookie
+    # httpOnly cross-origin (projets.md, Frontend) — incompatible avec un
+    # `allow_origins=["*"]`, ce qui est cohérent puisqu'on n'en utilise pas.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
-        allow_methods=["GET"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=True,
     )
 
 
