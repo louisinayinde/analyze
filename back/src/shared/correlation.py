@@ -33,6 +33,13 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         correlation_id = request.headers.get(CORRELATION_ID_HEADER) or str(uuid.uuid4())
+        # Sur `request.state` en plus du contextvar : un handler enregistré
+        # pour `Exception` (shared/errors.py) est promu par Starlette au
+        # niveau du middleware le plus externe, qui s'exécute après que ce
+        # `dispatch` ait fini (donc après le `reset()` du contextvar dans le
+        # `finally` ci-dessous). `request.state` survit à ce déroulement, pas
+        # le contextvar.
+        request.state.correlation_id = correlation_id
         token = _correlation_id.set(correlation_id)
         start = time.perf_counter()
 
