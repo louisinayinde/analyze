@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+
 from fastapi import APIRouter, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from composition.registry import Registry
 from shared.config import Settings, get_settings
 from shared.correlation import CORRELATION_ID_HEADER, CorrelationIdMiddleware, get_correlation_id
+from shared.db import create_engine, create_session_factory
 from shared.errors import ErreurAPI, ErreurDomaine
 from shared.logging import configure_logging
 
@@ -15,7 +19,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
 
-    app = FastAPI()
+    app = FastAPI(lifespan=_build_lifespan(settings))
     app.state.registry = Registry()
     app.state.settings = settings
 
@@ -93,6 +97,28 @@ def _reponse_erreur(request: Request, status_code: int, code: str, message: str)
     response = JSONResponse(status_code=status_code, content=erreur.model_dump())
     response.headers[CORRELATION_ID_HEADER] = correlation_id
     return response
+
+
+def _build_lifespan(
+    settings: Settings,
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Engine créé au démarrage (pas à l'import du module) pour que
+        # chaque processus (api, futur worker) ouvre son propre pool borné
+        # (shared/db.py) plutôt que d'en partager un global implicite.
+        engine = create_engine(settings)
+        app.state.db_engine = engine
+        app.state.db_sessionmaker = create_session_factory(engine)
+        try:
+            yield
+        finally:
+            # Ferme proprement toutes les connexions du pool à l'arrêt
+            # (reload, redeploy) : sans ça, chaque redémarrage fuit des
+            # connexions côté Postgres jusqu'à épuisement (agents.md §9).
+            await engine.dispose()
+
+    return lifespan
 
 
 def _routers() -> tuple[APIRouter, ...]:

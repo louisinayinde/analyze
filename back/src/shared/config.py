@@ -27,6 +27,17 @@ class Settings(BaseSettings):
 
     database_url: str
 
+    # Pool de connexions borné (agents.md §2, §3 ; projets.md §Base de
+    # données) : Cloud Run scale-to-zero peut redémarrer plusieurs
+    # instances d'un coup, chacune ouvrant son propre pool. Des valeurs
+    # basses par défaut évitent qu'une pointe de trafic ne sature les
+    # connexions max de Postgres/Cloud SQL. Ajustables par service via
+    # l'environnement si un besoin réel de charge le justifie.
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
+    db_pool_timeout_seconds: int = 30
+    db_pool_recycle_seconds: int = 1800
+
     jwt_signing_key: str
 
     # Vide tant que l'intégration LLM (EPIC E) n'est pas branchée.
