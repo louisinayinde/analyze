@@ -1,16 +1,18 @@
-import os
-
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from composition.registry import Registry
+from shared.config import Settings, get_settings
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
+
     app = FastAPI()
     app.state.registry = Registry()
+    app.state.settings = settings
 
-    _configure_cors(app)
+    _configure_cors(app, settings)
 
     for router in _routers():
         app.include_router(router)
@@ -20,13 +22,10 @@ def create_app() -> FastAPI:
     return app
 
 
-def _configure_cors(app: FastAPI) -> None:
-    origins = [
-        origin.strip() for origin in os.getenv("CORS_ORIGINS", "").split(",") if origin.strip()
-    ]
+def _configure_cors(app: FastAPI, settings: Settings) -> None:
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=origins,
+        allow_origins=settings.cors_origins_list,
         allow_methods=["GET"],
     )
 
