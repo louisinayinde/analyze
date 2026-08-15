@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import timedelta
 
 from fastapi import APIRouter, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -8,6 +9,15 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from composition.registry import Registry
+from modules.auth.adaptateurs.depot_refresh_token_postgres import DépôtRefreshTokenPostgres
+from modules.auth.adaptateurs.depot_utilisateur_postgres import DépôtUtilisateurPostgres
+from modules.auth.adaptateurs.emetteur_jwt import EmetteurJWT
+from modules.auth.adaptateurs.hacheur_argon2id import HacheurArgon2id
+from modules.auth.index import router as auth_router
+from modules.auth.ports.depot_refresh_token import DépôtRefreshTokenPort
+from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
+from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
+from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
 from shared.config import Settings, get_settings
 from shared.correlation import CORRELATION_ID_HEADER, CorrelationIdMiddleware, get_correlation_id
 from shared.db import create_engine, create_session_factory
@@ -22,6 +32,20 @@ def create_app() -> FastAPI:
     app = FastAPI(lifespan=_build_lifespan(settings))
     app.state.registry = Registry()
     app.state.settings = settings
+
+    # Câblage port -> adaptateur fait ici (et non dans le lifespan) : sans
+    # I/O ni ressource async à initialiser, `HacheurArgon2id` et
+    # `EmetteurJWT` peuvent être instanciés au moment de la construction de
+    # l'app (agents.md §4).
+    app.state.registry.register(HacheurMotDePassePort, HacheurArgon2id())
+    app.state.registry.register(
+        EmetteurJetonPort,
+        EmetteurJWT(
+            cle_signature=settings.jwt_signing_key,
+            duree_access=timedelta(minutes=settings.jwt_access_token_expire_minutes),
+            duree_refresh=timedelta(days=settings.jwt_refresh_token_expire_days),
+        ),
+    )
 
     _configure_cors(app, settings)
     # Ajouté après CORS pour l'englober (agents.md §3 : correlation_id
@@ -120,6 +144,18 @@ def _build_lifespan(
         engine = create_engine(settings)
         app.state.db_engine = engine
         app.state.db_sessionmaker = create_session_factory(engine)
+        # Câblage port -> adaptateur, fait une seule fois ici (agents.md §4) :
+        # les use-cases Auth (C3, C4) résolvent `DépôtUtilisateurPort` via
+        # le registre sans jamais importer l'adaptateur Postgres. Fait dans
+        # le lifespan (et non plus haut avec `HacheurArgon2id`/`EmetteurJWT`)
+        # car cet adaptateur dépend du sessionmaker, lui-même issu de
+        # l'engine créé ici — une vraie ressource I/O à initialiser.
+        app.state.registry.register(
+            DépôtUtilisateurPort, DépôtUtilisateurPostgres(app.state.db_sessionmaker)
+        )
+        app.state.registry.register(
+            DépôtRefreshTokenPort, DépôtRefreshTokenPostgres(app.state.db_sessionmaker)
+        )
         try:
             yield
         finally:
@@ -133,8 +169,8 @@ def _build_lifespan(
 
 def _routers() -> tuple[APIRouter, ...]:
     # Chaque module expose son router via son `index.py` (agents.md §4).
-    # Vide tant qu'aucun module n'en a un (arrive en C5, D4, D5...).
-    return ()
+    # Complété au fil des modules (C5 pour auth ; D4, D5... pour analyse).
+    return (auth_router,)
 
 
 def _mount_health(app: FastAPI) -> None:

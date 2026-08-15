@@ -40,6 +40,13 @@ class Settings(BaseSettings):
 
     jwt_signing_key: str
 
+    # « Quelques minutes » (projets.md §Sécurité, backlog C4) : une fuite de
+    # l'access token n'est exploitable que sur cette fenêtre. Le refresh,
+    # lui, vit en cookie httpOnly (front, J3) — sa fenêtre plus large est
+    # compensée par la rotation à chaque usage prévue en C6.
+    jwt_access_token_expire_minutes: int = 15
+    jwt_refresh_token_expire_days: int = 30
+
     # Vide tant que l'intégration LLM (EPIC E) n'est pas branchée.
     llm_api_key: str = ""
 

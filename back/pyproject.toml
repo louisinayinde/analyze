@@ -5,9 +5,12 @@ description = "API backend — Analyse-moi ça"
 requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.13",
+    "argon2-cffi>=25.1.0",
     "asyncpg>=0.30",
+    "email-validator>=2.3.0",
     "fastapi>=0.141.1",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.10.0",
     "sqlalchemy[asyncio]>=2.0",
     "uvicorn[standard]>=0.52.1",
 ]
@@ -19,6 +22,9 @@ package = false
 dev = [
     "ruff>=0.8",
     "mypy>=1.13",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "httpx>=0.28.1",
 ]
 
 [tool.ruff]
@@ -38,8 +44,27 @@ select = [
     "RUF", # règles spécifiques à ruff
 ]
 
+[tool.ruff.lint.flake8-bugbear]
+# `Depends(...)` en valeur par défaut est le patron FastAPI standard (C5) :
+# l'appel est réévalué à chaque requête par le framework lui-même, pas une
+# valeur mutable partagée entre requêtes comme B008 le suppose par défaut.
+extend-immutable-calls = ["fastapi.Depends"]
+
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+# `src` en layout plat (agents.md §4 : pas de `src/analyse_moi_ca/`
+# intermédiaire) : pytest doit ajouter `src/` au path pour résoudre les
+# imports `modules.auth...` comme le fait déjà mypy via `mypy_path`. `.`
+# (racine `back/`) est nécessaire en plus pour que les imports inter-tests
+# du type `from tests.modules.auth.conftest import ...` (C5, réutilisation
+# du faux dépôt entre tests d'application et d'API — agents.md §1, DRY)
+# résolvent quel que soit l'invocateur (`pytest` seul, sans dépendre de
+# l'insertion implicite du cwd que fait uniquement `python -m pytest`).
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [tool.mypy]
 python_version = "3.13"
