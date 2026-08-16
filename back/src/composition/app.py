@@ -189,8 +189,8 @@ def _build_lifespan(
 
 def _routers() -> tuple[APIRouter, ...]:
     # Chaque module expose son router via son `index.py` (agents.md §4).
-    # Complété au fil des modules (C5 pour auth ; D4 pour analyse, D5 s'y
-    # ajoutera sur le même router).
+    # Complété au fil des modules (C5 pour auth ; D4 puis D5 pour analyse,
+    # les deux routes de ce dernier partageant le même `APIRouter`).
     return (auth_router, analyse_router)
 
 

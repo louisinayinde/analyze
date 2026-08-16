@@ -197,3 +197,53 @@ def test_analyses_avec_jeton_invalide_retourne_401(client: TestClient) -> None:
 
     assert reponse.status_code == 401
     assert reponse.json()["code"] == "non_authentifie"
+
+
+def test_statut_d_une_analyse_terminee_retourne_le_resultat(client: TestClient) -> None:
+    creation = client.post(
+        "/analyses", json={"texte": "mon profil github pour le statut", "source_type": "github"}
+    )
+    analyse_id = creation.json()["id"]
+
+    reponse = client.get(f"/analyses/{analyse_id}/statut")
+
+    assert reponse.status_code == 200
+    corps = reponse.json()
+    assert corps["id"] == analyse_id
+    assert corps["statut"] == "done"
+    assert corps["resultat_texte"]
+    assert corps["resultat_image_url"]
+
+
+async def test_statut_d_une_analyse_pending_retourne_pending_sans_resultat(
+    client: TestClient, cache: CachePortEnMémoire
+) -> None:
+    en_cours = Analyse(
+        id=uuid.uuid4(),
+        texte_source="texte en cours de génération pour le statut",
+        source=SourceAnalyse.BIO,
+        statut=StatutAnalyse.PENDING,
+        created_at=datetime.now(UTC),
+    )
+    await cache.inserer_si_absent(en_cours)
+
+    reponse = client.get(f"/analyses/{en_cours.id}/statut")
+
+    assert reponse.status_code == 200
+    corps = reponse.json()
+    assert corps["statut"] == "pending"
+    assert corps["resultat_texte"] is None
+    assert corps["resultat_image_url"] is None
+
+
+def test_statut_d_un_id_inconnu_retourne_404(client: TestClient) -> None:
+    reponse = client.get(f"/analyses/{uuid.uuid4()}/statut")
+
+    assert reponse.status_code == 404
+    assert reponse.json()["code"] == "ressource_introuvable"
+
+
+def test_statut_avec_un_id_mal_forme_retourne_422(client: TestClient) -> None:
+    reponse = client.get("/analyses/pas-un-uuid/statut")
+
+    assert reponse.status_code == 422

@@ -1,3 +1,4 @@
+import uuid
 from abc import ABC, abstractmethod
 
 from modules.analyse.domaine.analyse import Analyse
@@ -16,6 +17,8 @@ class CachePort(ABC):
        IA.
     4. `marquer_termine` / `marquer_echec` — transition de la ligne une
        fois le job de génération terminé.
+    5. `obtenir_par_id` — lecture pure pour le polling de statut côté
+       client (D5, `GET /analyses/{id}/statut`), sans transition d'état.
 
     Le calcul de la clé de cache (`input_hash` = hash du texte normalisé +
     source) est un détail d'implémentation de l'adaptateur (D2) : le port
@@ -63,5 +66,21 @@ class CachePort(ABC):
         Métrique directe de l'économie de cache (projets.md
         §Observabilité) — appelée à chaque fois qu'une requête trouve une
         ligne déjà `done`, jamais lors de la création initiale.
+        """
+        ...
+
+    @abstractmethod
+    async def obtenir_par_id(self, analyse_id: uuid.UUID) -> Analyse | None:
+        """Recherche une analyse par son id (le `job_id` renvoyé par
+        `POST /analyses`), pour le polling de statut (D5).
+
+        Retourne `None` si aucune ligne ne correspond à cet id — au
+        use-case appelant (D5) de traduire ça en `404`, pas à ce port
+        (agents.md §4 : le port ne connaît pas HTTP).
+
+        `Analyse.texte_source` du résultat est toujours vide : la table
+        `cache_resultat` ne stocke jamais le texte brut, seulement son
+        hash (D2) — cohérent avec le fait que ce champ n'est de toute
+        façon pas exposé par la réponse `GET /analyses/{id}/statut`.
         """
         ...

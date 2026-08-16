@@ -1,8 +1,10 @@
+import uuid
+
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from modules.analyse.domaine.analyse import Analyse, StatutAnalyse
+from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
 from modules.analyse.ports.cache import CachePort
 from modules.cache.adaptateurs.input_hash import calculer_input_hash
 from modules.cache.adaptateurs.models import CacheResultatModel, SourceType, StatutCache
@@ -91,6 +93,28 @@ class CacheResultatPostgres(CachePort):
                 .values(status=StatutCache.FAILED.value)
             )
             await session.commit()
+
+    async def obtenir_par_id(self, analyse_id: uuid.UUID) -> Analyse | None:
+        async with self._sessionmaker() as session:
+            resultat = await session.execute(
+                select(CacheResultatModel).where(CacheResultatModel.id == analyse_id)
+            )
+            modele = resultat.scalar_one_or_none()
+
+        if modele is None:
+            return None
+
+        return Analyse(
+            id=modele.id,
+            # Jamais persisté (D2, cf. docstring du port) : seul
+            # `input_hash` est stocké, jamais le texte en clair.
+            texte_source="",
+            source=SourceAnalyse(modele.source_type.value),
+            statut=StatutAnalyse(modele.status.value),
+            created_at=modele.created_at,
+            resultat_texte=modele.output_text,
+            resultat_image_url=modele.output_image_url,
+        )
 
     async def incrementer_hit_count(self, analyse: Analyse) -> None:
         # Incrément atomique côté SQL (`hit_count = hit_count + 1`), pas un

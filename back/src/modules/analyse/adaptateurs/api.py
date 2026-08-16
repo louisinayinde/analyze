@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 
 from modules.analyse.application.generer_analyse import GenererAnalyse
+from modules.analyse.application.obtenir_statut_analyse import ObtenirStatutAnalyse
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
@@ -34,9 +35,14 @@ class AnalyseRequete(BaseModel):
 
 
 class AnalyseTermineeReponse(BaseModel):
-    """Réponse `200` — le résultat est immédiatement disponible (cache-hit,
-    ou première génération déjà terminée avant que ce ticket ne branche le
-    job asynchrone réel, voir F1).
+    """Réponse `200` de `POST /analyses` — le résultat est immédiatement
+    disponible (cache-hit, ou première génération déjà terminée avant que
+    ce ticket ne branche le job asynchrone réel, voir F1).
+
+    Réutilisée telle quelle comme réponse de `GET /analyses/{id}/statut`
+    (D5) : c'est exactement la forme `pending | done | failed (+ résultat
+    si done)` demandée par ce ticket, `statut` portant `PENDING`/`FAILED`
+    avec les deux champs résultat à `None` dans ces cas.
     """
 
     id: uuid.UUID
@@ -103,3 +109,23 @@ async def creer_analyse(
         extra={"analyse_id": str(analyse.id), "user_id": str(user_id) if user_id else None},
     )
     return AnalyseEnAttenteReponse(job_id=analyse.id)
+
+
+def _obtenir_statut_analyse(request: Request) -> ObtenirStatutAnalyse:
+    # Même motif de résolution différée que `_generer_analyse` ci-dessus.
+    registry = request.app.state.registry
+    return ObtenirStatutAnalyse(cache=registry.resolve(CachePort))
+
+
+@router.get("/{analyse_id}/statut", response_model=AnalyseTermineeReponse)
+async def obtenir_statut_analyse(
+    analyse_id: uuid.UUID,
+    use_case: ObtenirStatutAnalyse = Depends(_obtenir_statut_analyse),
+) -> AnalyseTermineeReponse:
+    # Pas d'authentification requise (D5, agents.md §7 : rien de sensible
+    # n'est exposé — `job_id` est un UUID non énumérable, le texte source
+    # lui-même n'est jamais retourné, cf. `CachePort.obtenir_par_id`) —
+    # même posture que `POST /analyses` (D4) : le polling K3 ne doit
+    # dépendre d'aucune page d'auth.
+    analyse = await use_case.executer(analyse_id)
+    return AnalyseTermineeReponse.depuis_domaine(analyse)

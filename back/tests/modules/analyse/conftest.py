@@ -43,6 +43,12 @@ class CachePortEnMémoire(CachePort):
     async def incrementer_hit_count(self, analyse: Analyse) -> None:
         self.hit_counts[analyse.id] = self.hit_counts.get(analyse.id, 0) + 1
 
+    async def obtenir_par_id(self, analyse_id: uuid.UUID) -> Analyse | None:
+        for analyse in self._par_cle.values():
+            if analyse.id == analyse_id:
+                return analyse
+        return None
+
 
 class StockageImageEnMémoire(StockageImagePort):
     """Faux `StockageImagePort` en mémoire, partagé par les tests Analyse (D3).
