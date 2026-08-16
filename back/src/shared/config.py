@@ -47,8 +47,16 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 30
 
-    # Vide tant que l'intégration LLM (EPIC E) n'est pas branchée.
+    # Vide tant que l'intégration LLM (EPIC E) n'est pas branchée en
+    # production (E1 fournit l'adaptateur ; le câblage au point de
+    # composition attend E2, voir modules/ia/adaptateurs/adaptateur_claude.py).
     llm_api_key: str = ""
+
+    # Modèle Claude utilisé par AdaptateurClaude (E1). Haiku par défaut :
+    # un roast de quelques phrases ne justifie pas un modèle frontier
+    # (agents.md §2, budget). Changer de modèle = changer cette valeur,
+    # aucune ligne de code (agents.md §4 : décision réversible).
+    llm_model: str = "claude-haiku-4-5"
 
     cors_origins: str = ""
 
