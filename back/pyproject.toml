@@ -10,6 +10,7 @@ dependencies = [
     "asyncpg>=0.30",
     "email-validator>=2.3.0",
     "fastapi>=0.141.1",
+    "google-cloud-storage>=3.13.1",
     "pillow>=10.4",
     "pydantic-settings>=2.15.0",
     "pyjwt>=2.10.0",
@@ -74,3 +75,11 @@ mypy_path = "src"
 strict = true
 # Non inclus par défaut dans --strict : signale le code mort après un `return`/`raise`.
 warn_unreachable = true
+
+# `google-cloud-storage` (E5, backlog.md) ne ship aucun marqueur `py.typed`
+# ni stubs officiels — seul module tiers du projet dans ce cas (`anthropic`
+# en fournit). Désactiver la vérification des imports pour ce seul module,
+# pas globalement, pour ne pas perdre le typage strict sur le reste.
+[[tool.mypy.overrides]]
+module = "google.cloud.*"
+ignore_missing_imports = true

@@ -6,11 +6,14 @@ class StockageImagePort(ABC):
     agents.md §4).
 
     Défini dans les termes du métier (stocker un contenu, obtenir son URL
-    publique), sans mention de filesystem ou de GCS. L'adaptateur réel
-    (E5, deux implémentations : filesystem local en dev, GCS en prod)
-    implémente ce contrat ; le câblage port -> adaptateur se fait au point
-    de composition selon l'environnement, jamais dans le domaine ou
-    l'use-case (D3).
+    publique), sans mention de filesystem ou de GCS. Deux implémentations
+    réelles (E5, backlog.md) : `StockageImageFilesystem` (dev, écrit sur un
+    volume Docker et sert les fichiers via `StaticFiles`) et
+    `StockageImageGCS` (prod, activée seulement après L4 — provisionnement
+    du bucket). Le câblage port -> adaptateur se fait selon l'environnement
+    au point de composition (`composition/app.py`, `GCS_BUCKET_IMAGES` de
+    `shared/config.py` comme bascule), jamais dans le domaine ou
+    l'use-case (D3, agents.md §4).
     """
 
     @abstractmethod

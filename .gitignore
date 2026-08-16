@@ -10,6 +10,12 @@ back/__pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# images stockées par StockageImageFilesystem (E5, dev hors docker-compose) —
+# en conteneur, isolées du bind mount par le volume Docker `images_data`,
+# jamais un souci ; hors conteneur (run local direct), ce dossier peut
+# apparaître dans l'arbre de travail sans jamais devoir être committé.
+back/data/
+
 # secrets locaux — ne jamais committer
 .env
 .env.local

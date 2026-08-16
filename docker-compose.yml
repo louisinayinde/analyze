@@ -36,6 +36,11 @@ services:
     volumes:
       - ./back:/app
       - /app/.venv
+      # Volume Docker dédié (pas le bind mount ./back:/app ci-dessus) pour
+      # StockageImageFilesystem (E5, backlog.md) : les images générées en
+      # dev doivent survivre à un restart du conteneur sans jamais finir
+      # committées dans le dépôt git.
+      - images_data:/app/data/images
     ports:
       - "8000:8000"
     env_file:
@@ -75,3 +80,4 @@ services:
 
 volumes:
   postgres_data:
+  images_data:

@@ -1,15 +1,17 @@
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from composition.registry import Registry
-from modules.analyse.index import StockageImageFactice
+from modules.analyse.index import StockageImageFilesystem, StockageImageGCS
 from modules.analyse.index import router as analyse_router
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
@@ -57,13 +59,11 @@ def create_app() -> FastAPI:
     # clé API est configurée, sinon `GenerateurIAFactice` (D1) : évite de
     # forcer une clé Anthropic payante juste pour lancer l'API en dev local
     # (agents.md §2, budget — même esprit que « on ne paie pas d'infra pour
-    # itérer sur de la logique validable gratuitement »). `StockageImagePort`
-    # -> `StockageImageFactice` (D4), en attendant l'adaptateur réel d'E5.
-    # Aucun de ces adaptateurs n'a d'I/O à initialiser à la construction,
-    # câblés ici pour la même raison que `HacheurArgon2id`/`EmetteurJWT`
-    # ci-dessus. Remplacer `GenerateurIAFactice` par `AdaptateurClaude` (ou
-    # `StockageImageFactice` par l'adaptateur GCS d'E5) ne touche aucune
-    # ligne du use-case `GenererAnalyse` (D3, agents.md §4).
+    # itérer sur de la logique validable gratuitement »). Câblés ici pour la
+    # même raison que `HacheurArgon2id`/`EmetteurJWT` ci-dessus : aucun de
+    # ces adaptateurs n'a d'I/O à initialiser à la construction. Remplacer
+    # `GenerateurIAFactice` par `AdaptateurClaude` ne touche aucune ligne du
+    # use-case `GenererAnalyse` (D3, agents.md §4).
     #
     # `AdaptateurClaude` est décoré par `GenerateurIAAvecCircuitBreaker`
     # (E4, backlog.md) : seul le chemin réel passe par le disjoncteur —
@@ -77,7 +77,38 @@ def create_app() -> FastAPI:
         )
     else:
         app.state.registry.register(GenerateurIAPort, GenerateurIAFactice())
-    app.state.registry.register(StockageImagePort, StockageImageFactice())
+
+    # `StockageImagePort` (E5, backlog.md) -> `StockageImageGCS` si un
+    # bucket est configuré, sinon `StockageImageFilesystem` : même bascule
+    # que `GenerateurIAPort` ci-dessus, sur le même principe (agents.md §2 —
+    # `GCS_BUCKET_IMAGES` ne sera renseignée en prod qu'une fois L4
+    # (provisionnement Terraform du bucket) fait). Remplacer l'un par
+    # l'autre ne touche aucune ligne du use-case `GenererAnalyse` (D3,
+    # agents.md §4).
+    if settings.gcs_bucket_images:
+        app.state.registry.register(
+            StockageImagePort, StockageImageGCS(bucket=settings.gcs_bucket_images)
+        )
+    else:
+        repertoire_images = Path(settings.local_storage_dir)
+        app.state.registry.register(
+            StockageImagePort,
+            StockageImageFilesystem(
+                repertoire=repertoire_images, url_publique_base=settings.api_public_url
+            ),
+        )
+        # Sert les fichiers écrits par `StockageImageFilesystem` en HTTP :
+        # sans ce montage, l'URL renvoyée par l'adaptateur (`/images/...`)
+        # ne répondrait rien. Absent en prod (branche GCS ci-dessus) — les
+        # images y sont servies directement par GCS/Cloud CDN (L4), jamais
+        # par ce processus API. `check_dir=False` : le dossier n'est créé
+        # qu'au premier `stocker()` (adaptateur, agents.md §2 YAGNI) —
+        # sans ça, `StaticFiles` lève au montage si aucune image n'a encore
+        # été générée (ex. premier boot, ou tests qui construisent l'app
+        # sans jamais déclencher d'écriture réelle).
+        app.mount(
+            "/images", StaticFiles(directory=repertoire_images, check_dir=False), name="images"
+        )
 
     _configure_cors(app, settings)
     # Ajouté après CORS pour l'englober (agents.md §3 : correlation_id

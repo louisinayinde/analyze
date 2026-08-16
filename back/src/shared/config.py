@@ -64,6 +64,27 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    # `StockageImagePort` (E5, backlog.md) : vide par défaut -> adaptateur
+    # filesystem local (dev, écrit sur le volume Docker `images_data`,
+    # voir docker-compose.yml). Renseigné -> `StockageImageGCS` est câblé à
+    # la place (composition/app.py), sans changement de code — même bascule
+    # que `llm_api_key` ci-dessus, activée seulement une fois le bucket
+    # provisionné par L4 (backlog.md).
+    gcs_bucket_images: str = ""
+
+    # Dossier d'écriture de l'adaptateur filesystem, relatif au `WORKDIR`
+    # du conteneur `api` (`/app`, voir Dockerfile.dev). Isolé du bind mount
+    # `./back:/app` par un volume Docker dédié (docker-compose.yml) : sans
+    # ça, chaque image générée en dev finirait committée dans le dépôt.
+    local_storage_dir: str = "data/images"
+
+    # URL depuis laquelle le navigateur atteint l'API (pas le nom de
+    # service Docker `api`, résolvable seulement entre conteneurs) : sert à
+    # construire l'URL publique d'une image stockée en local
+    # (`{api_public_url}/images/{cle}.png`). Doit rester cohérent avec
+    # `NEXT_PUBLIC_API_URL` (front) en dev.
+    api_public_url: str = "http://localhost:8000"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

@@ -53,9 +53,11 @@ class CachePortEnMémoire(CachePort):
 class StockageImageEnMémoire(StockageImagePort):
     """Faux `StockageImagePort` en mémoire, partagé par les tests Analyse (D3).
 
-    Le vrai adaptateur (filesystem local / GCS) arrive en E5 ; ce faux
-    permet de tester l'orchestration de `GenererAnalyse` sans dépendre de
-    son existence — le use-case ne connaît que le port (agents.md §4).
+    Les vrais adaptateurs (`StockageImageFilesystem`/`StockageImageGCS`,
+    E5) ont leurs propres tests dédiés (tests/modules/analyse/adaptateurs/) ;
+    ce faux permet de tester l'orchestration de `GenererAnalyse` sans
+    écrire de vrais fichiers ni appeler GCS — le use-case ne connaît que le
+    port (agents.md §4).
     """
 
     def __init__(self) -> None:

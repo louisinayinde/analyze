@@ -70,11 +70,11 @@ def client(
     with TestClient(app) as test_client:
         app.state.registry.register(DépôtUtilisateurPort, DépôtUtilisateurEnMémoire())
         app.state.registry.register(DépôtRefreshTokenPort, DépôtRefreshTokenEnMémoire())
-        # Remplace les adaptateurs provisoires câblés par `create_app()`
-        # (`GenerateurIAFactice`/`StockageImageFactice`) par des instances
-        # dédiées à ce test, pour pouvoir observer les compteurs d'appels
-        # (`generateur_ia.appels_texte`) sans dépendre d'un état partagé
-        # entre tests.
+        # Remplace les adaptateurs câblés par `create_app()`
+        # (`GenerateurIAFactice`/`StockageImageFilesystem`) par des
+        # instances dédiées à ce test, pour pouvoir observer les compteurs
+        # d'appels (`generateur_ia.appels_texte`) sans dépendre d'un état
+        # partagé entre tests, ni écrire de vrais fichiers sur disque.
         app.state.registry.register(CachePort, cache)
         app.state.registry.register(GenerateurIAPort, generateur_ia)
         app.state.registry.register(StockageImagePort, StockageImageEnMémoire())
