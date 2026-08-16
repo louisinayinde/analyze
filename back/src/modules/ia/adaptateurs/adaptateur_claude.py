@@ -14,10 +14,22 @@ MODELE_PAR_DEFAUT = "claude-haiku-4-5"
 # connexion ouverte pour si peu de tokens de sortie).
 MAX_TOKENS_REPONSE = 1024
 
-# agents.md §3 : « un appel sans timeout est un blocage en attente ». Le
-# retry avec backoff (E3, backlog.md) n'est pas fait ici — seul le timeout,
-# non négociable, l'est.
+# agents.md §3 : « un appel sans timeout est un blocage en attente ».
 TIMEOUT_PAR_DEFAUT_SECONDES = 30.0
+
+# E3 (backlog.md) : retry avec backoff exponentiel + jitter, valable ici car
+# `generer_texte` est idempotent (même prompt -> même résultat attendu,
+# protégé par ailleurs par le cache exact côté CACHE_RESULTAT). Le SDK
+# `anthropic` implémente déjà ce mécanisme (voir `_base_client.py` :
+# backoff = min(0.5 * 2^n, 8s), jitter +/-25%) et ne retry que sur les échecs
+# réellement transitoires (timeout, erreur de connexion, HTTP 408/409/429 et
+# 5xx) — jamais sur une 400/401. Réécrire cette logique à la main (ou via une
+# dépendance comme `tenacity`) referait ce que le SDK fait déjà correctement :
+# une dépendance de plus pour un résultat identique va contre agents.md §2.
+# On se contente donc de le rendre explicite plutôt que de laisser la valeur
+# implicite du SDK (`DEFAULT_MAX_RETRIES = 2`), pour la même raison que le
+# timeout ci-dessus : explicite vaut mieux qu'implicite sur un appel externe.
+NOMBRE_RETRIES_PAR_DEFAUT = 2
 
 _PROMPT_SYSTEME = """\
 Tu es le moteur d'analyse de « Analyse-moi ça », un outil qui transforme un \
@@ -78,8 +90,11 @@ class AdaptateurClaude(GenerateurIAPort):
         api_key: str,
         modele: str = MODELE_PAR_DEFAUT,
         timeout_secondes: float = TIMEOUT_PAR_DEFAUT_SECONDES,
+        max_retries: int = NOMBRE_RETRIES_PAR_DEFAUT,
     ) -> None:
-        self._client = AsyncAnthropic(api_key=api_key, timeout=timeout_secondes)
+        self._client = AsyncAnthropic(
+            api_key=api_key, timeout=timeout_secondes, max_retries=max_retries
+        )
         self._modele = modele
 
     async def generer_texte(self, texte_source: str, source: SourceAnalyse) -> str:
