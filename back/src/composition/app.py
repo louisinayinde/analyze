@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from composition.registry import Registry
+from modules.analyse.ports.cache import CachePort
 from modules.auth.adaptateurs.depot_refresh_token_postgres import DépôtRefreshTokenPostgres
 from modules.auth.adaptateurs.depot_utilisateur_postgres import DépôtUtilisateurPostgres
 from modules.auth.adaptateurs.emetteur_jwt import EmetteurJWT
@@ -18,6 +19,7 @@ from modules.auth.ports.depot_refresh_token import DépôtRefreshTokenPort
 from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
 from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
+from modules.cache.index import CacheResultatPostgres
 from shared.config import Settings, get_settings
 from shared.correlation import CORRELATION_ID_HEADER, CorrelationIdMiddleware, get_correlation_id
 from shared.db import create_engine, create_session_factory
@@ -156,6 +158,11 @@ def _build_lifespan(
         app.state.registry.register(
             DépôtRefreshTokenPort, DépôtRefreshTokenPostgres(app.state.db_sessionmaker)
         )
+        # `CachePort` (D1) -> adaptateur Postgres (D2) : câblé ici pour la
+        # même raison que les dépôts Auth ci-dessus, dépend du même
+        # sessionmaker. Le use-case `GenererAnalyse` (D3) le résout via le
+        # registre sans jamais importer `CacheResultatPostgres`.
+        app.state.registry.register(CachePort, CacheResultatPostgres(app.state.db_sessionmaker))
         try:
             yield
         finally:
