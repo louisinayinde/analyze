@@ -1,6 +1,7 @@
 from anthropic import AsyncAnthropic
 
 from modules.analyse.index import GenerateurIAPort, SourceAnalyse
+from modules.ia.adaptateurs.rendu_image_template import generer_image_resultat
 
 # Haiku, pas un modèle "raisonnement" (agents.md §2, budget très limité) :
 # produire 3-6 phrases de roast fun ne justifie pas le coût d'un modèle
@@ -62,13 +63,14 @@ class AdaptateurClaude(GenerateurIAPort):
     fournisseur IA est un détail d'adaptateur, jamais une préoccupation du
     domaine ou de l'application.
 
-    `generer_image` n'est volontairement pas implémentée ici : la stratégie
-    de génération d'image (LLM multimodal vs template + overlay) est une
-    décision encore ouverte, propre au ticket E2 (backlog.md). L'implémenter
-    maintenant reviendrait à deviner cette décision. Tant qu'E2 n'est pas
-    fait, le point de composition continue de câbler `GenerateurIAFactice`
-    pour `GenerateurIAPort` plutôt que cet adaptateur — appeler
-    `generer_image` ferait échouer toute analyse réelle en production.
+    `generer_image` délègue à `rendu_image_template.generer_image_resultat`
+    (E2, backlog.md — décision utilisateur : template + overlay de texte
+    plutôt qu'un modèle multimodal, quasi gratuit et déterministe). Le rendu
+    lui-même est un module pur séparé, pas dupliqué ici : appeler l'API
+    Claude et rendre un template sont deux raisons de changer distinctes
+    (agents.md §1, SRP) ; cette classe reste la seule implémentation réelle
+    de `GenerateurIAPort`, câblée au point de composition maintenant que les
+    deux méthodes du port sont couvertes.
     """
 
     def __init__(
@@ -114,9 +116,9 @@ class AdaptateurClaude(GenerateurIAPort):
         return texte.strip()
 
     async def generer_image(self, texte_resultat: str) -> bytes:
-        raise NotImplementedError(
-            "Génération d'image réelle non implémentée (E1, backlog.md) : "
-            "la stratégie (LLM multimodal vs template + overlay) est une "
-            "décision ouverte propre à E2. Utiliser GenerateurIAFactice ou "
-            "StockageImagePort en attendant."
-        )
+        # Rendu synchrone en pratique (Pillow, pas d'I/O réseau) mais la
+        # signature du port est asynchrone (agents.md §3 : uniforme pour tout
+        # appelant, qu'un futur adaptateur image fasse ou non un appel
+        # réseau) — pas de `await` nécessaire ici, `rendu_image_template` ne
+        # bloque la boucle d'événements que le temps du rendu lui-même.
+        return generer_image_resultat(texte_resultat)

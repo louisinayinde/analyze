@@ -6,6 +6,7 @@ from anthropic.types import Message, TextBlock, Usage
 
 from modules.analyse.domaine.analyse import SourceAnalyse
 from modules.ia.adaptateurs.adaptateur_claude import AdaptateurClaude
+from modules.ia.adaptateurs.rendu_image_template import generer_image_resultat
 
 
 def _reponse_texte(texte: str) -> Message:
@@ -92,10 +93,12 @@ async def test_generer_texte_propage_les_erreurs_du_sdk() -> None:
         await adaptateur.generer_texte("Mon profil GitHub", SourceAnalyse.GITHUB)
 
 
-async def test_generer_image_leve_notimplementederror() -> None:
-    # Décision explicitement hors scope d'E1 (backlog.md) : la stratégie
-    # d'image (LLM multimodal vs template) est ouverte, propre à E2.
+async def test_generer_image_delegue_au_rendu_template() -> None:
+    # E2 (backlog.md) : décision utilisateur, template + overlay plutôt
+    # qu'un modèle multimodal — `AdaptateurClaude.generer_image` ne fait
+    # aucun appel réseau, contrairement à `generer_texte`.
     adaptateur = AdaptateurClaude(api_key="cle-de-test")
 
-    with pytest.raises(NotImplementedError):
-        await adaptateur.generer_image("Un texte de résultat")
+    resultat = await adaptateur.generer_image("Un texte de résultat")
+
+    assert resultat == generer_image_resultat("Un texte de résultat")

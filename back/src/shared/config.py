@@ -47,9 +47,11 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 30
 
-    # Vide tant que l'intégration LLM (EPIC E) n'est pas branchée en
-    # production (E1 fournit l'adaptateur ; le câblage au point de
-    # composition attend E2, voir modules/ia/adaptateurs/adaptateur_claude.py).
+    # Vide par défaut : le point de composition (composition/app.py) reste
+    # alors sur `GenerateurIAFactice` plutôt que d'exiger une clé Anthropic
+    # payante pour lancer l'API en dev local (agents.md §2, budget).
+    # Renseignée -> `AdaptateurClaude` (E1 texte, E2 image) est câblé à la
+    # place, sans changement de code.
     llm_api_key: str = ""
 
     # Modèle Claude utilisé par AdaptateurClaude (E1). Haiku par défaut :

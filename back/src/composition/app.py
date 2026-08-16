@@ -24,7 +24,7 @@ from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
 from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
 from modules.cache.index import CacheResultatPostgres
-from modules.ia.index import GenerateurIAFactice
+from modules.ia.index import AdaptateurClaude, GenerateurIAFactice
 from shared.config import Settings, get_settings
 from shared.correlation import CORRELATION_ID_HEADER, CorrelationIdMiddleware, get_correlation_id
 from shared.db import create_engine, create_session_factory
@@ -53,13 +53,24 @@ def create_app() -> FastAPI:
             duree_refresh=timedelta(days=settings.jwt_refresh_token_expire_days),
         ),
     )
-    # `GenerateurIAPort` -> `GenerateurIAFactice` (D1) et `StockageImagePort`
-    # -> `StockageImageFactice` (D4) : deux adaptateurs provisoires, sans
-    # I/O ni ressource async à initialiser, câblés ici pour la même raison
-    # que `HacheurArgon2id`/`EmetteurJWT` ci-dessus. Remplacés sans toucher
-    # au use-case `GenererAnalyse` (D3) par les adaptateurs réels quand
-    # E1/E2 (génération) et E5 (stockage) seront prêts (agents.md §4).
-    app.state.registry.register(GenerateurIAPort, GenerateurIAFactice())
+    # `GenerateurIAPort` -> `AdaptateurClaude` (E1/E2, texte + image) si une
+    # clé API est configurée, sinon `GenerateurIAFactice` (D1) : évite de
+    # forcer une clé Anthropic payante juste pour lancer l'API en dev local
+    # (agents.md §2, budget — même esprit que « on ne paie pas d'infra pour
+    # itérer sur de la logique validable gratuitement »). `StockageImagePort`
+    # -> `StockageImageFactice` (D4), en attendant l'adaptateur réel d'E5.
+    # Aucun de ces adaptateurs n'a d'I/O à initialiser à la construction,
+    # câblés ici pour la même raison que `HacheurArgon2id`/`EmetteurJWT`
+    # ci-dessus. Remplacer `GenerateurIAFactice` par `AdaptateurClaude` (ou
+    # `StockageImageFactice` par l'adaptateur GCS d'E5) ne touche aucune
+    # ligne du use-case `GenererAnalyse` (D3, agents.md §4).
+    if settings.llm_api_key:
+        app.state.registry.register(
+            GenerateurIAPort,
+            AdaptateurClaude(api_key=settings.llm_api_key, modele=settings.llm_model),
+        )
+    else:
+        app.state.registry.register(GenerateurIAPort, GenerateurIAFactice())
     app.state.registry.register(StockageImagePort, StockageImageFactice())
 
     _configure_cors(app, settings)

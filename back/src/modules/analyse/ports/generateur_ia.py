@@ -11,17 +11,18 @@ class GenerateurIAPort(ABC):
     précis — aucune mention de Claude, OpenAI ou d'un SDK ici.
     L'adaptateur réel implémente ce contrat ; le câblage port -> adaptateur
     se fait au point de composition, jamais dans le domaine ou l'use-case
-    (D3). `AdaptateurClaude` (E1, modules/ia/adaptateurs/adaptateur_claude.py)
-    couvre `generer_texte` avec le fournisseur retenu (Claude). Sa
-    `generer_image` lève volontairement `NotImplementedError` : la stratégie
-    d'image (LLM multimodal vs template) est une décision encore ouverte,
-    propre à E2 — tant qu'E2 n'est pas fait, le point de composition
-    continue de câbler `GenerateurIAFactice` pour ce port.
+    (D3). `AdaptateurClaude` (E1/E2, modules/ia/adaptateurs/adaptateur_claude.py)
+    couvre les deux méthodes : `generer_texte` via l'API Claude, `generer_image`
+    par délégation à `rendu_image_template` (template + overlay de texte,
+    décision utilisateur du ticket E2 — quasi gratuit, déterministe, pas de
+    second fournisseur IA à gérer). C'est la seule implémentation réelle du
+    port, câblée au point de composition dès qu'une clé API est configurée
+    (`shared/config.py`, `composition/app.py`).
 
-    En attendant, `GenerateurIAFactice`
-    (modules/ia/adaptateurs/generateur_ia_factice.py, fourni dès D1)
-    permet de tester la logique de concurrence (D3, D6) sans dépendre d'un
-    vrai fournisseur.
+    En dev local sans clé configurée, `GenerateurIAFactice`
+    (modules/ia/adaptateurs/generateur_ia_factice.py, fourni dès D1) reste
+    câblée à la place : permet de tester la logique de concurrence (D3, D6)
+    sans dépendre d'un vrai fournisseur ni d'un budget API.
 
     Méthodes asynchrones car tout appel réel est un appel réseau vers un
     fournisseur externe (agents.md §3 : timeout/retry explicites, ajoutés
