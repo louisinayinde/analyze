@@ -85,6 +85,26 @@ class Settings(BaseSettings):
     # `NEXT_PUBLIC_API_URL` (front) en dev.
     api_public_url: str = "http://localhost:8000"
 
+    # `FileJobsPort` (F1, backlog.md) : vide par défaut -> adaptateur
+    # `FileJobsEnProcessusImmediat` (dev, exécute le job en synchrone dans
+    # le même processus, pas besoin de Cloud Tasks en local). Renseignée ->
+    # `FileJobsCloudTasks` est câblé à la place (composition/app.py),
+    # activé seulement une fois L7 fait (provisionnement Terraform de la
+    # queue) — même bascule que `gcs_bucket_images`/`llm_api_key` ci-dessus
+    # (agents.md §2).
+    cloud_tasks_queue: str = ""
+
+    # Requis seulement si `cloud_tasks_queue` est renseignée : projet et
+    # région GCP de la queue, URL interne du service `worker` (F3,
+    # backlog.md) qui recevra les tâches, et service account utilisé pour
+    # signer le jeton OIDC que F3 vérifiera à réception — l'endpoint
+    # interne du worker ne doit pas être appelable par n'importe qui
+    # (agents.md §7).
+    gcp_project_id: str = ""
+    gcp_region: str = ""
+    worker_internal_url: str = ""
+    worker_service_account_email: str = ""
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

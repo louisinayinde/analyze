@@ -4,9 +4,14 @@ from datetime import UTC, datetime
 import pytest
 from tests.modules.analyse.conftest import CachePortEnMémoire, StockageImageEnMémoire
 
+from modules.analyse.adaptateurs.file_jobs_en_processus_immediat import (
+    FileJobsEnProcessusImmediat,
+)
+from modules.analyse.application.executer_job_generation import ExecuterJobGeneration
 from modules.analyse.application.generer_analyse import GenererAnalyse
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
 from modules.analyse.domaine.texte_analyse import TEXTE_LONGUEUR_MAX
+from modules.analyse.ports.file_jobs import FileJobsPort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
 from modules.ia.adaptateurs.circuit_breaker import CircuitBreaker
 from modules.ia.adaptateurs.generateur_ia_avec_circuit_breaker import (
@@ -32,12 +37,40 @@ class _GenerateurIAEnEchec(GenerateurIAPort):
         raise RuntimeError("le fournisseur IA est en échec")
 
 
+class _FileJobsEnMemoireEspion(FileJobsPort):
+    """Faux `FileJobsPort` qui enregistre les dispatchs sans exécuter le job
+    (F1) — isole les assertions sur la logique de dispatch de
+    `GenererAnalyse` de la génération elle-même (`ExecuterJobGeneration`,
+    déjà couverte par les tests ci-dessous qui branchent
+    `FileJobsEnProcessusImmediat`). Un appel enregistré ici sans exécution
+    reproduit le comportement observable de `FileJobsCloudTasks` (prod) :
+    la ligne reste `pending` juste après l'appel.
+    """
+
+    def __init__(self) -> None:
+        self.dispatched: list[Analyse] = []
+
+    async def dispatcher(self, analyse: Analyse) -> None:
+        self.dispatched.append(analyse)
+
+
+def _use_case_en_processus_immediat(
+    generateur_ia: GenerateurIAPort,
+) -> tuple[GenererAnalyse, CachePortEnMémoire, StockageImageEnMémoire]:
+    cache = CachePortEnMémoire()
+    stockage = StockageImageEnMémoire()
+    executer_job = ExecuterJobGeneration(
+        cache=cache, generateur_ia=generateur_ia, stockage_image=stockage
+    )
+    file_jobs = FileJobsEnProcessusImmediat(executer_job.executer)
+    use_case = GenererAnalyse(cache=cache, file_jobs=file_jobs)
+    return use_case, cache, stockage
+
+
 @pytest.fixture
 def generer_analyse() -> FixtureUseCase:
-    cache = CachePortEnMémoire()
     generateur = GenerateurIAFactice()
-    stockage = StockageImageEnMémoire()
-    use_case = GenererAnalyse(cache=cache, generateur_ia=generateur, stockage_image=stockage)
+    use_case, cache, stockage = _use_case_en_processus_immediat(generateur)
     return use_case, cache, generateur, stockage
 
 
@@ -106,11 +139,7 @@ async def test_deux_sources_differentes_pour_le_meme_texte_declenchent_chacune_u
 
 
 async def test_echec_du_job_marque_la_ligne_failed_plutot_que_de_la_laisser_pending() -> None:
-    cache = CachePortEnMémoire()
-    stockage = StockageImageEnMémoire()
-    use_case = GenererAnalyse(
-        cache=cache, generateur_ia=_GenerateurIAEnEchec(), stockage_image=stockage
-    )
+    use_case, cache, _stockage = _use_case_en_processus_immediat(_GenerateurIAEnEchec())
 
     with pytest.raises(RuntimeError):
         await use_case.executer("Mon profil GitHub", SourceAnalyse.GITHUB)
@@ -136,12 +165,10 @@ async def test_circuit_ouvert_marque_la_ligne_failed_et_leve_service_indisponibl
     # laisser la ligne bloquée en `pending`, ni propager un timeout brut —
     # `ServiceIndisponible` (503, "réessaie dans quelques minutes") doit
     # remonter, et `marquer_echec` doit quand même s'exécuter (agents.md §3).
-    cache = CachePortEnMémoire()
-    stockage = StockageImageEnMémoire()
     generateur = GenerateurIAAvecCircuitBreaker(
         _GenerateurIAEnEchec(), CircuitBreaker(seuil_echecs=1)
     )
-    use_case = GenererAnalyse(cache=cache, generateur_ia=generateur, stockage_image=stockage)
+    use_case, cache, _stockage = _use_case_en_processus_immediat(generateur)
 
     with pytest.raises(RuntimeError):
         await use_case.executer("Un premier texte", SourceAnalyse.GITHUB)
@@ -218,3 +245,69 @@ async def test_marqueurs_de_prompt_injection_grossiers_sont_retires_avant_l_appe
     assert "System:" not in resultat.resultat_texte
     assert "<|im_start|>" not in resultat.resultat_texte
     assert "Mon profil GitHub." in resultat.resultat_texte
+
+
+async def test_premier_appel_dispatche_le_job_via_le_port_sans_generer_en_direct() -> None:
+    # F1 (backlog.md) : preuve que `GenererAnalyse` ne fait plus appel à la
+    # génération elle-même (retiré en `ExecuterJobGeneration`) mais passe
+    # exclusivement par `FileJobsPort.dispatcher` — c'est le test concret
+    # du branchement du port dans D3 exigé par agents.md §4.
+    cache = CachePortEnMémoire()
+    file_jobs = _FileJobsEnMemoireEspion()
+    use_case = GenererAnalyse(cache=cache, file_jobs=file_jobs)
+
+    resultat = await use_case.executer("Mon profil GitHub", SourceAnalyse.GITHUB)
+
+    assert resultat.statut is StatutAnalyse.PENDING
+    assert len(file_jobs.dispatched) == 1
+    assert file_jobs.dispatched[0].texte_source == "Mon profil GitHub"
+    assert file_jobs.dispatched[0].source is SourceAnalyse.GITHUB
+
+
+async def test_texte_deja_pending_ne_redispatche_pas_le_job() -> None:
+    cache = CachePortEnMémoire()
+    file_jobs = _FileJobsEnMemoireEspion()
+    use_case = GenererAnalyse(cache=cache, file_jobs=file_jobs)
+    en_cours = Analyse(
+        id=uuid.uuid4(),
+        texte_source="Mon profil GitHub",
+        source=SourceAnalyse.GITHUB,
+        statut=StatutAnalyse.PENDING,
+        created_at=datetime.now(UTC),
+    )
+    await cache.inserer_si_absent(en_cours)
+
+    resultat = await use_case.executer("Mon profil GitHub", SourceAnalyse.GITHUB)
+
+    assert resultat.statut is StatutAnalyse.PENDING
+    assert file_jobs.dispatched == []
+
+
+async def test_texte_deja_done_ne_redispatche_pas_le_job() -> None:
+    cache = CachePortEnMémoire()
+    file_jobs = _FileJobsEnMemoireEspion()
+    termine = Analyse(
+        id=uuid.uuid4(),
+        texte_source="Mon profil GitHub",
+        source=SourceAnalyse.GITHUB,
+        statut=StatutAnalyse.PENDING,
+        created_at=datetime.now(UTC),
+    )
+    await cache.inserer_si_absent(termine)
+    await cache.marquer_termine(
+        Analyse(
+            id=termine.id,
+            texte_source=termine.texte_source,
+            source=termine.source,
+            statut=StatutAnalyse.DONE,
+            created_at=termine.created_at,
+            resultat_texte="déjà généré",
+            resultat_image_url="memoire://deja-genere",
+        )
+    )
+    use_case = GenererAnalyse(cache=cache, file_jobs=file_jobs)
+
+    resultat = await use_case.executer("Mon profil GitHub", SourceAnalyse.GITHUB)
+
+    assert resultat.statut is StatutAnalyse.DONE
+    assert file_jobs.dispatched == []

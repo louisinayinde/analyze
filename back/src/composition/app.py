@@ -11,9 +11,17 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from composition.registry import Registry
-from modules.analyse.index import StockageImageFilesystem, StockageImageGCS
+from modules.analyse.domaine.analyse import Analyse
+from modules.analyse.index import (
+    ExecuterJobGeneration,
+    FileJobsCloudTasks,
+    FileJobsEnProcessusImmediat,
+    StockageImageFilesystem,
+    StockageImageGCS,
+)
 from modules.analyse.index import router as analyse_router
 from modules.analyse.ports.cache import CachePort
+from modules.analyse.ports.file_jobs import FileJobsPort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
 from modules.analyse.ports.stockage_image import StockageImagePort
 from modules.auth.adaptateurs.depot_refresh_token_postgres import DépôtRefreshTokenPostgres
@@ -109,6 +117,39 @@ def create_app() -> FastAPI:
         app.mount(
             "/images", StaticFiles(directory=repertoire_images, check_dir=False), name="images"
         )
+
+    # `FileJobsPort` (F1, backlog.md) -> `FileJobsCloudTasks` si une queue
+    # est configurée, sinon `FileJobsEnProcessusImmediat` : même bascule
+    # que `GenerateurIAPort`/`StockageImagePort` ci-dessus (agents.md §2 —
+    # `CLOUD_TASKS_QUEUE` ne sera renseignée en prod qu'une fois L7 fait).
+    # Câblé ici (et non dans le lifespan) : ni l'un ni l'autre adaptateur
+    # n'a besoin du sessionmaker DB à la construction — `_executer_job`
+    # résout `CachePort`/`GenerateurIAPort`/`StockageImagePort` depuis le
+    # registre à l'exécution, pas à la construction, ce qui les rend
+    # compatibles avec les tests qui remplacent ces adaptateurs par des
+    # doubles en mémoire après `create_app()` (voir docstring de
+    # `FileJobsEnProcessusImmediat`).
+    async def _executer_job(analyse: Analyse) -> Analyse:
+        executer_job_generation = ExecuterJobGeneration(
+            cache=app.state.registry.resolve(CachePort),
+            generateur_ia=app.state.registry.resolve(GenerateurIAPort),
+            stockage_image=app.state.registry.resolve(StockageImagePort),
+        )
+        return await executer_job_generation.executer(analyse)
+
+    if settings.cloud_tasks_queue:
+        app.state.registry.register(
+            FileJobsPort,
+            FileJobsCloudTasks(
+                project=settings.gcp_project_id,
+                location=settings.gcp_region,
+                queue=settings.cloud_tasks_queue,
+                url_worker=settings.worker_internal_url,
+                service_account_email=settings.worker_service_account_email,
+            ),
+        )
+    else:
+        app.state.registry.register(FileJobsPort, FileJobsEnProcessusImmediat(_executer_job))
 
     _configure_cors(app, settings)
     # Ajouté après CORS pour l'englober (agents.md §3 : correlation_id

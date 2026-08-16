@@ -11,6 +11,7 @@ dependencies = [
     "email-validator>=2.3.0",
     "fastapi>=0.141.1",
     "google-cloud-storage>=3.13.1",
+    "google-cloud-tasks>=2.24.0",
     "pillow>=10.4",
     "pydantic-settings>=2.15.0",
     "pyjwt>=2.10.0",
@@ -77,9 +78,15 @@ strict = true
 warn_unreachable = true
 
 # `google-cloud-storage` (E5, backlog.md) ne ship aucun marqueur `py.typed`
-# ni stubs officiels — seul module tiers du projet dans ce cas (`anthropic`
-# en fournit). Désactiver la vérification des imports pour ce seul module,
-# pas globalement, pour ne pas perdre le typage strict sur le reste.
+# ni stubs officiels, contrairement à `google-cloud-tasks` (F1, backlog.md)
+# qui en fournit pour `tasks_v2` — seuls modules tiers du projet dans ce cas
+# (`anthropic` en fournit). Sans `follow_imports = "skip"`, mypy traite
+# `google.cloud` comme un paquet partiellement typé dès que l'un de ses
+# sous-modules (`tasks_v2`) est typé, et se met à réclamer un typage complet
+# du reste (`storage`) — `skip` neutralise tout le namespace `google.cloud.*`
+# de façon uniforme, pas globalement au projet, pour ne pas perdre le typage
+# strict sur le reste.
 [[tool.mypy.overrides]]
 module = "google.cloud.*"
 ignore_missing_imports = true
+follow_imports = "skip"

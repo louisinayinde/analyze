@@ -8,8 +8,7 @@ from modules.analyse.application.generer_analyse import GenererAnalyse
 from modules.analyse.application.obtenir_statut_analyse import ObtenirStatutAnalyse
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
 from modules.analyse.ports.cache import CachePort
-from modules.analyse.ports.generateur_ia import GenerateurIAPort
-from modules.analyse.ports.stockage_image import StockageImagePort
+from modules.analyse.ports.file_jobs import FileJobsPort
 from modules.auth.index import get_current_user_optional
 
 # Adaptateur d'entrée (driving adapter, agents.md §4) : seul fichier du
@@ -72,12 +71,14 @@ def _generer_analyse(request: Request) -> GenererAnalyse:
     # Résolu à chaque requête (et non une fois à la création du router) :
     # les adaptateurs ne sont câblés dans le registre qu'au lifespan de
     # l'app (composition/app.py), après le montage des routers — même
-    # motif que `modules/auth/adaptateurs/api.py`.
+    # motif que `modules/auth/adaptateurs/api.py`. Depuis F1, `GenererAnalyse`
+    # ne dépend plus directement de `GenerateurIAPort`/`StockageImagePort`
+    # (déplacés dans `ExecuterJobGeneration`, invoquée par l'adaptateur
+    # `FileJobsPort`) : cette route ne connaît que le cache et la file de jobs.
     registry = request.app.state.registry
     return GenererAnalyse(
         cache=registry.resolve(CachePort),
-        generateur_ia=registry.resolve(GenerateurIAPort),
-        stockage_image=registry.resolve(StockageImagePort),
+        file_jobs=registry.resolve(FileJobsPort),
     )
 
 
@@ -92,10 +93,11 @@ async def creer_analyse(
 
     # Le statut renvoyé par le use-case (D3) décide seul du code HTTP : pas
     # de branchement sur le fait que cet appel ait ou non créé la ligne de
-    # cache. Une fois F1 branché, un cache-miss frais laissera aussi le
-    # statut à `pending` (job dispatché de façon réellement asynchrone) et
-    # tombera naturellement dans la même branche `202` ci-dessous, sans
-    # qu'il faille toucher ce fichier (agents.md §4).
+    # cache. Depuis F1, un cache-miss frais peut lui aussi laisser le
+    # statut à `pending` (job dispatché de façon réellement asynchrone via
+    # `FileJobsCloudTasks` en prod) et tombe naturellement dans la même
+    # branche `202` ci-dessous, sans qu'il faille toucher ce fichier
+    # (agents.md §4).
     if analyse.statut is StatutAnalyse.DONE:
         _logger.info(
             "analyse_disponible",

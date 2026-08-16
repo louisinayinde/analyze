@@ -4,8 +4,7 @@ from datetime import UTC, datetime
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
 from modules.analyse.domaine.texte_analyse import valider_et_nettoyer_texte
 from modules.analyse.ports.cache import CachePort
-from modules.analyse.ports.generateur_ia import GenerateurIAPort
-from modules.analyse.ports.stockage_image import StockageImagePort
+from modules.analyse.ports.file_jobs import FileJobsPort
 
 
 class GenererAnalyse:
@@ -15,25 +14,29 @@ class GenererAnalyse:
     cache) : deux users qui collent le même texte en même temps ne doivent
     déclencher qu'un seul appel IA, sinon la promesse de cache exact du
     projet est cassée (backlog.md D3 — ticket bloquant agents.md §6 🔴).
+    1. `INSERT ... ON CONFLICT (input_hash) DO NOTHING` avec
+       `status = 'pending'` (`CachePort.inserer_si_absent`).
+    2. Insertion réussie → on est le premier, on déclenche le job via
+       `FileJobsPort` (F1, backlog.md).
+    3. Ligne déjà `done` → retour direct du résultat.
+    4. Ligne déjà `pending` → retour tel quel, pas de nouvel appel.
 
-    Ne dépend que des ports (`CachePort`, `GenerateurIAPort`,
-    `StockageImagePort`), jamais d'un adaptateur concret : brancher
-    l'adaptateur IA réel (E1/E2) ou le stockage réel (E5) derrière ces
-    mêmes ports ne doit toucher aucune ligne de ce fichier (agents.md §4).
-    L'appel au job de génération est fait ici en synchrone, direct — le
-    port `FileJobsPort` (F1) le rendra asynchrone sans changer cette
-    logique de concurrence.
+    Ne dépend que des ports (`CachePort`, `FileJobsPort`), jamais d'un
+    adaptateur concret : remplacer `FileJobsEnProcessusImmediat` (dev) par
+    `FileJobsCloudTasks` (prod, F1) — ou, en amont, l'adaptateur IA réel
+    (E1/E2) par le stockage réel (E5) derrière `ExecuterJobGeneration` —
+    ne touche aucune ligne de ce fichier (agents.md §4).
+
+    F1 a extrait la génération elle-même (appel IA + stockage image) dans
+    `ExecuterJobGeneration` : ce use-case ne fait plus que l'orchestration
+    du cache et le déclenchement du job, jamais la génération en direct
+    (c'est tout l'objet du port `FileJobsPort` — avant F1, l'appel était
+    fait ici en synchrone, direct, en attendant que ce ticket existe).
     """
 
-    def __init__(
-        self,
-        cache: CachePort,
-        generateur_ia: GenerateurIAPort,
-        stockage_image: StockageImagePort,
-    ) -> None:
+    def __init__(self, cache: CachePort, file_jobs: FileJobsPort) -> None:
         self._cache = cache
-        self._generateur_ia = generateur_ia
-        self._stockage_image = stockage_image
+        self._file_jobs = file_jobs
 
     async def executer(self, texte_source: str, source: SourceAnalyse) -> Analyse:
         # D7 (backlog.md) : longueur, vide/whitespace et sanitisation
@@ -56,44 +59,26 @@ class GenererAnalyse:
 
         if cree:
             # Étape 2 : on est le premier appelant pour ce texte + cette
-            # source, on déclenche le job.
-            return await self._generer_et_persister(analyse)
+            # source, on déclenche le job via le port (F1) plutôt que
+            # d'appeler la génération en direct.
+            await self._file_jobs.dispatcher(analyse)
+            # `dispatcher` ne retourne rien (le use-case ne doit pas
+            # dépendre du résultat de la génération à cet endroit) : on
+            # relit systématiquement l'état à jour. `FileJobsEnProcessusImmediat`
+            # (dev) exécute le job en synchrone avant de retourner — la
+            # relecture voit donc déjà `done`/`failed`. `FileJobsCloudTasks`
+            # (prod) retourne dès l'enfilage de la tâche — la relecture voit
+            # encore `pending`, ce qui est le `202` attendu pour un
+            # cache-miss réellement asynchrone.
+            return await self._cache.obtenir_par_id(analyse.id) or analyse
 
         if analyse.statut is StatutAnalyse.DONE:
             # Étape 3 : résultat déjà en cache, aucun nouvel appel IA.
             await self._cache.incrementer_hit_count(analyse)
             return analyse
 
-        # Étape 4 : la ligne existe déjà en `pending` (un autre appelant
-        # génère déjà le résultat) — ou en `failed` (hors du périmètre de
-        # retry de ce ticket, voir E4). Dans les deux cas, pas de nouvel
-        # appel IA : l'appelant renvoie 202 et laisse le client poller.
+        # Étape 4 : la ligne existe déjà en `pending` (un autre appelant a
+        # déjà déclenché le job) — ou en `failed` (hors du périmètre de
+        # retry de ce ticket, voir E4). Dans les deux cas, pas de nouveau
+        # dispatch : l'appelant renvoie 202 et laisse le client poller.
         return analyse
-
-    async def _generer_et_persister(self, analyse: Analyse) -> Analyse:
-        try:
-            resultat_texte = await self._generateur_ia.generer_texte(
-                analyse.texte_source, analyse.source
-            )
-            image = await self._generateur_ia.generer_image(resultat_texte)
-            resultat_image_url = await self._stockage_image.stocker(image, str(analyse.id))
-        except Exception:
-            # Sans ce filet, une exception pendant le job laisserait la
-            # ligne bloquée en `pending` pour toujours : l'étape 4 de
-            # l'algorithme renvoie 202 sans jamais redéclencher de job tant
-            # que le statut reste `pending`. `marquer_echec` complète le
-            # filet côté cache (agents.md §3 — dégradation gracieuse ; E4
-            # ajoutera le circuit breaker en amont de cet appel).
-            await self._cache.marquer_echec(analyse)
-            raise
-
-        analyse_terminee = Analyse(
-            id=analyse.id,
-            texte_source=analyse.texte_source,
-            source=analyse.source,
-            statut=StatutAnalyse.DONE,
-            created_at=analyse.created_at,
-            resultat_texte=resultat_texte,
-            resultat_image_url=resultat_image_url,
-        )
-        return await self._cache.marquer_termine(analyse_terminee)
