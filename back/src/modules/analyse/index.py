@@ -1,3 +1,5 @@
+from modules.analyse.adaptateurs.api import router
+from modules.analyse.adaptateurs.stockage_image_factice import StockageImageFactice
 from modules.analyse.application.generer_analyse import GenererAnalyse
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
 from modules.analyse.ports.cache import CachePort
@@ -8,8 +10,12 @@ from modules.analyse.ports.stockage_image import StockageImagePort
 # vocabulaire (`SourceAnalyse`, `StatutAnalyse`) et les trois ports, dont
 # les adaptateurs (D2 pour `CachePort`, E1/E2 pour `GenerateurIAPort`, E5
 # pour `StockageImagePort`) ont besoin pour implémenter ces contrats sans
-# jamais importer un fichier interne de `domaine/` ou `ports/`. D3 y
-# ajoute le use-case `GenererAnalyse` ; le routeur HTTP viendra en D4/D5.
+# jamais importer un fichier interne de `domaine/` ou `ports/`. D3 y ajoute
+# le use-case `GenererAnalyse`. D4 y ajoute `router` (POST /analyses) ainsi
+# que `StockageImageFactice`, adaptateur provisoire câblé au point de
+# composition en attendant E5 — même rôle que `GenerateurIAFactice` (D1,
+# exposé par `modules.ia.index`) vis-à-vis de `GenerateurIAPort`. Le
+# routeur `GET /analyses/{id}/statut` viendra en D5.
 __all__ = [
     "Analyse",
     "CachePort",
@@ -17,5 +23,7 @@ __all__ = [
     "GenererAnalyse",
     "SourceAnalyse",
     "StatutAnalyse",
+    "StockageImageFactice",
     "StockageImagePort",
+    "router",
 ]

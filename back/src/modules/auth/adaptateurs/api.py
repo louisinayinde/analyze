@@ -167,6 +167,31 @@ async def get_current_user(
     return donnees.user_id
 
 
+async def get_current_user_optional(
+    identifiants: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    emetteur: EmetteurJetonPort = Depends(_emetteur_jeton),
+) -> uuid.UUID | None:
+    """Variante optionnelle de `get_current_user` (D4, backlog.md).
+
+    `POST /analyses` accepte un appelant anonyme aussi bien qu'authentifié
+    (projets.md : rate limiting distinct IP/anonyme vs user_id/authentifié
+    en G2/G3, historique personnel réservé aux users connectés en H3) —
+    l'authentification ne doit jamais devenir obligatoire pour utiliser le
+    produit (K1 ne dépend d'aucune page d'auth, J).
+
+    Absence de jeton -> `None` (appelant anonyme, chemin nominal, aucune
+    exception). Jeton présenté mais invalide/expiré -> lève `NonAuthentifie`
+    comme `get_current_user` : jamais de dégradation silencieuse vers
+    `None`, un client qui se croit connecté ne doit pas se retrouver traité
+    comme anonyme sans le savoir (agents.md §7).
+    """
+    if identifiants is None:
+        return None
+
+    donnees = emetteur.decoder_acces(identifiants.credentials)
+    return donnees.user_id
+
+
 @router.post(
     "/inscription",
     response_model=UtilisateurReponse,

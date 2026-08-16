@@ -9,7 +9,11 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from composition.registry import Registry
+from modules.analyse.index import StockageImageFactice
+from modules.analyse.index import router as analyse_router
 from modules.analyse.ports.cache import CachePort
+from modules.analyse.ports.generateur_ia import GenerateurIAPort
+from modules.analyse.ports.stockage_image import StockageImagePort
 from modules.auth.adaptateurs.depot_refresh_token_postgres import DépôtRefreshTokenPostgres
 from modules.auth.adaptateurs.depot_utilisateur_postgres import DépôtUtilisateurPostgres
 from modules.auth.adaptateurs.emetteur_jwt import EmetteurJWT
@@ -20,6 +24,7 @@ from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
 from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
 from modules.cache.index import CacheResultatPostgres
+from modules.ia.index import GenerateurIAFactice
 from shared.config import Settings, get_settings
 from shared.correlation import CORRELATION_ID_HEADER, CorrelationIdMiddleware, get_correlation_id
 from shared.db import create_engine, create_session_factory
@@ -48,6 +53,14 @@ def create_app() -> FastAPI:
             duree_refresh=timedelta(days=settings.jwt_refresh_token_expire_days),
         ),
     )
+    # `GenerateurIAPort` -> `GenerateurIAFactice` (D1) et `StockageImagePort`
+    # -> `StockageImageFactice` (D4) : deux adaptateurs provisoires, sans
+    # I/O ni ressource async à initialiser, câblés ici pour la même raison
+    # que `HacheurArgon2id`/`EmetteurJWT` ci-dessus. Remplacés sans toucher
+    # au use-case `GenererAnalyse` (D3) par les adaptateurs réels quand
+    # E1/E2 (génération) et E5 (stockage) seront prêts (agents.md §4).
+    app.state.registry.register(GenerateurIAPort, GenerateurIAFactice())
+    app.state.registry.register(StockageImagePort, StockageImageFactice())
 
     _configure_cors(app, settings)
     # Ajouté après CORS pour l'englober (agents.md §3 : correlation_id
@@ -176,8 +189,9 @@ def _build_lifespan(
 
 def _routers() -> tuple[APIRouter, ...]:
     # Chaque module expose son router via son `index.py` (agents.md §4).
-    # Complété au fil des modules (C5 pour auth ; D4, D5... pour analyse).
-    return (auth_router,)
+    # Complété au fil des modules (C5 pour auth ; D4 pour analyse, D5 s'y
+    # ajoutera sur le même router).
+    return (auth_router, analyse_router)
 
 
 def _mount_health(app: FastAPI) -> None:
