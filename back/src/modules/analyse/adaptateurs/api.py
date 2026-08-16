@@ -2,7 +2,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from modules.analyse.application.generer_analyse import GenererAnalyse
 from modules.analyse.application.obtenir_statut_analyse import ObtenirStatutAnalyse
@@ -18,19 +18,19 @@ from modules.auth.index import get_current_user_optional
 # composition via `index.py` (composition/app.py, D4).
 router = APIRouter(prefix="/analyses", tags=["analyse"])
 
-# projets.md §Backend : « validation stricte de la longueur du texte en
-# entrée (ex. 5000 caractères max) — borne le coût d'un appel et limite
-# l'abus ». `min_length=1` couvre la borne basse de la même règle (une
-# entrée vide n'a rien à analyser) ; le rejet du contenu whitespace-only et
-# la sanitisation anti prompt-injection sont un renforcement volontairement
-# laissé à D7 (backlog.md), pas une validation de longueur.
-TEXTE_LONGUEUR_MAX = 5000
-
+# La validation du texte (longueur, vide/whitespace, sanitisation
+# anti prompt-injection grossière — D7, backlog.md) vit entièrement dans
+# `valider_et_nettoyer_texte` (domaine, agents.md §4) et est appliquée par
+# le use-case (D3), pas ici : même posture que `mot_de_passe.valider_robustesse`
+# côté module Auth — une seule source de vérité pour la règle (agents.md §1),
+# appliquée à tout appelant du use-case, pas seulement à cette route. Ce
+# modèle Pydantic ne valide donc que la *forme* de la requête HTTP
+# (présence des champs, type), jamais les règles métier.
 _logger = logging.getLogger("analyse")
 
 
 class AnalyseRequete(BaseModel):
-    texte: str = Field(min_length=1, max_length=TEXTE_LONGUEUR_MAX)
+    texte: str
     source_type: SourceAnalyse
 
 

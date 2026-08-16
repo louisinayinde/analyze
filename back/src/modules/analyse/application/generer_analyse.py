@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
+from modules.analyse.domaine.texte_analyse import valider_et_nettoyer_texte
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
 from modules.analyse.ports.stockage_image import StockageImagePort
@@ -35,6 +36,11 @@ class GenererAnalyse:
         self._stockage_image = stockage_image
 
     async def executer(self, texte_source: str, source: SourceAnalyse) -> Analyse:
+        # D7 (backlog.md) : longueur, vide/whitespace et sanitisation
+        # anti prompt-injection grossière, appliquées ici pour couvrir tout
+        # appelant du use-case, pas seulement `POST /analyses` (D4).
+        texte_source = valider_et_nettoyer_texte(texte_source)
+
         candidate = Analyse(
             id=uuid.uuid4(),
             texte_source=texte_source,
