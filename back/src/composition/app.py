@@ -24,7 +24,7 @@ from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
 from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
 from modules.cache.index import CacheResultatPostgres
-from modules.ia.index import AdaptateurClaude, GenerateurIAFactice
+from modules.ia.index import AdaptateurClaude, GenerateurIAAvecCircuitBreaker, GenerateurIAFactice
 from shared.config import Settings, get_settings
 from shared.correlation import CORRELATION_ID_HEADER, CorrelationIdMiddleware, get_correlation_id
 from shared.db import create_engine, create_session_factory
@@ -64,10 +64,16 @@ def create_app() -> FastAPI:
     # ci-dessus. Remplacer `GenerateurIAFactice` par `AdaptateurClaude` (ou
     # `StockageImageFactice` par l'adaptateur GCS d'E5) ne touche aucune
     # ligne du use-case `GenererAnalyse` (D3, agents.md §4).
+    #
+    # `AdaptateurClaude` est décoré par `GenerateurIAAvecCircuitBreaker`
+    # (E4, backlog.md) : seul le chemin réel passe par le disjoncteur —
+    # `GenerateurIAFactice` ne fait aucun appel réseau, rien à isoler.
     if settings.llm_api_key:
         app.state.registry.register(
             GenerateurIAPort,
-            AdaptateurClaude(api_key=settings.llm_api_key, modele=settings.llm_model),
+            GenerateurIAAvecCircuitBreaker(
+                AdaptateurClaude(api_key=settings.llm_api_key, modele=settings.llm_model)
+            ),
         )
     else:
         app.state.registry.register(GenerateurIAPort, GenerateurIAFactice())

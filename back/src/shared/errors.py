@@ -61,3 +61,21 @@ class AccesRefuse(ErreurDomaine):
     code = "acces_refuse"
     status_code = 403
     message_par_defaut = "Accès refusé."
+
+
+class ServiceIndisponible(ErreurDomaine):
+    """Levée quand une dépendance externe est en incident (E4, backlog.md).
+
+    503, pas 500 : contrairement à `erreur_interne` (bug de notre côté),
+    ce cas est prévisible et temporaire — le client sait qu'il peut
+    retenter plus tard. Levée notamment par `CircuitBreaker`
+    (modules/ia/adaptateurs/circuit_breaker.py) quand le circuit est
+    ouvert, plutôt que de laisser un timeout brut remonter (agents.md §3 —
+    isoler la panne, pas la propager).
+    """
+
+    code = "service_indisponible"
+    status_code = 503
+    message_par_defaut = (
+        "Le service est temporairement indisponible, réessaie dans quelques minutes."
+    )

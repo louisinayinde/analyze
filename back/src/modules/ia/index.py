@@ -1,4 +1,8 @@
 from modules.ia.adaptateurs.adaptateur_claude import AdaptateurClaude
+from modules.ia.adaptateurs.circuit_breaker import CircuitBreaker
+from modules.ia.adaptateurs.generateur_ia_avec_circuit_breaker import (
+    GenerateurIAAvecCircuitBreaker,
+)
 from modules.ia.adaptateurs.generateur_ia_factice import GenerateurIAFactice
 
 # Seule surface publique du module (agents.md §4). D1 n'expose que
@@ -6,5 +10,12 @@ from modules.ia.adaptateurs.generateur_ia_factice import GenerateurIAFactice
 # E2 complète `generer_image` (template + overlay, voir
 # rendu_image_template.py — module interne, pas exposé ici, appelé
 # uniquement par `AdaptateurClaude`) sans changer la façon dont le point de
-# composition ou les tests importent ce module.
-__all__ = ["AdaptateurClaude", "GenerateurIAFactice"]
+# composition ou les tests importent ce module. E4 y ajoute `CircuitBreaker`
+# (primitive générique) et `GenerateurIAAvecCircuitBreaker` (décorateur du
+# port), câblé autour d'`AdaptateurClaude` au point de composition.
+__all__ = [
+    "AdaptateurClaude",
+    "CircuitBreaker",
+    "GenerateurIAAvecCircuitBreaker",
+    "GenerateurIAFactice",
+]

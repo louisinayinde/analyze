@@ -8,8 +8,12 @@ from modules.analyse.application.generer_analyse import GenererAnalyse
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
 from modules.analyse.domaine.texte_analyse import TEXTE_LONGUEUR_MAX
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
+from modules.ia.adaptateurs.circuit_breaker import CircuitBreaker
+from modules.ia.adaptateurs.generateur_ia_avec_circuit_breaker import (
+    GenerateurIAAvecCircuitBreaker,
+)
 from modules.ia.adaptateurs.generateur_ia_factice import GenerateurIAFactice
-from shared.errors import EntreeInvalide
+from shared.errors import EntreeInvalide, ServiceIndisponible
 
 FixtureUseCase = tuple[
     GenererAnalyse, CachePortEnMémoire, GenerateurIAFactice, StockageImageEnMémoire
@@ -117,6 +121,39 @@ async def test_echec_du_job_marque_la_ligne_failed_plutot_que_de_la_laisser_pend
     sonde = Analyse(
         id=uuid.uuid4(),
         texte_source="Mon profil GitHub",
+        source=SourceAnalyse.GITHUB,
+        statut=StatutAnalyse.PENDING,
+        created_at=datetime.now(UTC),
+    )
+    ligne_apres_echec, cree = await cache.inserer_si_absent(sonde)
+
+    assert cree is False
+    assert ligne_apres_echec.statut is StatutAnalyse.FAILED
+
+
+async def test_circuit_ouvert_marque_la_ligne_failed_et_leve_service_indisponible() -> None:
+    # E4 (backlog.md) : une fois le circuit ouvert, le use-case ne doit ni
+    # laisser la ligne bloquée en `pending`, ni propager un timeout brut —
+    # `ServiceIndisponible` (503, "réessaie dans quelques minutes") doit
+    # remonter, et `marquer_echec` doit quand même s'exécuter (agents.md §3).
+    cache = CachePortEnMémoire()
+    stockage = StockageImageEnMémoire()
+    generateur = GenerateurIAAvecCircuitBreaker(
+        _GenerateurIAEnEchec(), CircuitBreaker(seuil_echecs=1)
+    )
+    use_case = GenererAnalyse(cache=cache, generateur_ia=generateur, stockage_image=stockage)
+
+    with pytest.raises(RuntimeError):
+        await use_case.executer("Un premier texte", SourceAnalyse.GITHUB)
+
+    # Seuil atteint (1) : ce second texte, différent, ne doit même plus
+    # toucher `_GenerateurIAEnEchec` — le circuit coupe court directement.
+    with pytest.raises(ServiceIndisponible):
+        await use_case.executer("Un second texte, différent", SourceAnalyse.GITHUB)
+
+    sonde = Analyse(
+        id=uuid.uuid4(),
+        texte_source="Un second texte, différent",
         source=SourceAnalyse.GITHUB,
         statut=StatutAnalyse.PENDING,
         created_at=datetime.now(UTC),

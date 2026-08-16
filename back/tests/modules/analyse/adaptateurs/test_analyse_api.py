@@ -15,10 +15,27 @@ from modules.analyse.ports.generateur_ia import GenerateurIAPort
 from modules.analyse.ports.stockage_image import StockageImagePort
 from modules.auth.ports.depot_refresh_token import DépôtRefreshTokenPort
 from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
+from modules.ia.adaptateurs.circuit_breaker import CircuitBreaker
+from modules.ia.adaptateurs.generateur_ia_avec_circuit_breaker import (
+    GenerateurIAAvecCircuitBreaker,
+)
 from modules.ia.adaptateurs.generateur_ia_factice import GenerateurIAFactice
 from shared.config import get_settings
 
 MOT_DE_PASSE_ROBUSTE = "cheval-trombone-9"
+
+
+class _GenerateurIAEnEchec(GenerateurIAPort):
+    """Faux `GenerateurIAPort` qui échoue systématiquement (E4) — utilisé
+    ici pour vérifier la réponse HTTP une fois le circuit ouvert, pas la
+    logique du disjoncteur lui-même (déjà couverte par
+    tests/modules/ia/adaptateurs/test_circuit_breaker.py)."""
+
+    async def generer_texte(self, texte_source: str, source: SourceAnalyse) -> str:
+        raise RuntimeError("panne fournisseur")
+
+    async def generer_image(self, texte_resultat: str) -> bytes:
+        raise RuntimeError("panne fournisseur")
 
 
 @pytest.fixture
@@ -275,3 +292,46 @@ def test_statut_avec_un_id_mal_forme_retourne_422(client: TestClient) -> None:
     reponse = client.get("/analyses/pas-un-uuid/statut")
 
     assert reponse.status_code == 422
+
+
+async def test_analyses_retourne_503_et_marque_failed_quand_le_circuit_est_ouvert(
+    client: TestClient, cache: CachePortEnMémoire
+) -> None:
+    # E4 (backlog.md) : une fois le seuil d'échecs consécutifs atteint,
+    # l'endpoint doit répondre 503 avec un message clair ("réessaie dans
+    # quelques minutes"), jamais un timeout brut ni un 500 générique
+    # (agents.md §3 — dégradation gracieuse) — et la ligne de cache
+    # correspondante ne doit pas rester bloquée en `pending`.
+    generateur_en_panne = GenerateurIAAvecCircuitBreaker(
+        _GenerateurIAEnEchec(), CircuitBreaker(seuil_echecs=1)
+    )
+    client.app.state.registry.register(GenerateurIAPort, generateur_en_panne)  # type: ignore[union-attr]
+
+    # Premier appel : panne "normale" du fournisseur, le seuil est atteint
+    # après cet appel. `TestClient` relève l'exception brute plutôt que de
+    # la masquer en 500 (`raise_server_exceptions=True` par défaut) : c'est
+    # un comportement de test, la 500 JSON reste bien renvoyée à un vrai
+    # client HTTP en production.
+    with pytest.raises(RuntimeError):
+        client.post("/analyses", json={"texte": "un premier texte", "source_type": "autre"})
+
+    seconde = client.post(
+        "/analyses", json={"texte": "un second texte différent", "source_type": "autre"}
+    )
+
+    assert seconde.status_code == 503
+    corps = seconde.json()
+    assert corps["code"] == "service_indisponible"
+    assert "réessaie" in corps["message"].lower()
+
+    sonde = Analyse(
+        id=uuid.uuid4(),
+        texte_source="un second texte différent",
+        source=SourceAnalyse.AUTRE,
+        statut=StatutAnalyse.PENDING,
+        created_at=datetime.now(UTC),
+    )
+    ligne_apres_echec, cree = await cache.inserer_si_absent(sonde)
+
+    assert cree is False
+    assert ligne_apres_echec.statut is StatutAnalyse.FAILED
