@@ -3,21 +3,18 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from composition.adapters import build_generateur_ia, build_stockage_image
+from composition.error_handling import configure_error_handling
 from composition.registry import Registry
 from modules.analyse.domaine.analyse import Analyse
 from modules.analyse.index import (
     ExecuterJobGeneration,
     FileJobsCloudTasks,
     FileJobsEnProcessusImmediat,
-    StockageImageFilesystem,
-    StockageImageGCS,
 )
 from modules.analyse.index import router as analyse_router
 from modules.analyse.ports.cache import CachePort
@@ -34,11 +31,9 @@ from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
 from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
 from modules.cache.index import CacheResultatPostgres
-from modules.ia.index import AdaptateurClaude, GenerateurIAAvecCircuitBreaker, GenerateurIAFactice
 from shared.config import Settings, get_settings
-from shared.correlation import CORRELATION_ID_HEADER, CorrelationIdMiddleware, get_correlation_id
+from shared.correlation import CorrelationIdMiddleware
 from shared.db import create_engine, create_session_factory
-from shared.errors import ErreurAPI, ErreurDomaine
 from shared.logging import configure_logging
 
 
@@ -63,57 +58,30 @@ def create_app() -> FastAPI:
             duree_refresh=timedelta(days=settings.jwt_refresh_token_expire_days),
         ),
     )
-    # `GenerateurIAPort` -> `AdaptateurClaude` (E1/E2, texte + image) si une
-    # clé API est configurée, sinon `GenerateurIAFactice` (D1) : évite de
-    # forcer une clé Anthropic payante juste pour lancer l'API en dev local
-    # (agents.md §2, budget — même esprit que « on ne paie pas d'infra pour
-    # itérer sur de la logique validable gratuitement »). Câblés ici pour la
-    # même raison que `HacheurArgon2id`/`EmetteurJWT` ci-dessus : aucun de
-    # ces adaptateurs n'a d'I/O à initialiser à la construction. Remplacer
-    # `GenerateurIAFactice` par `AdaptateurClaude` ne touche aucune ligne du
-    # use-case `GenererAnalyse` (D3, agents.md §4).
-    #
-    # `AdaptateurClaude` est décoré par `GenerateurIAAvecCircuitBreaker`
-    # (E4, backlog.md) : seul le chemin réel passe par le disjoncteur —
-    # `GenerateurIAFactice` ne fait aucun appel réseau, rien à isoler.
-    if settings.llm_api_key:
-        app.state.registry.register(
-            GenerateurIAPort,
-            GenerateurIAAvecCircuitBreaker(
-                AdaptateurClaude(api_key=settings.llm_api_key, modele=settings.llm_model)
-            ),
-        )
-    else:
-        app.state.registry.register(GenerateurIAPort, GenerateurIAFactice())
+    # `GenerateurIAPort`/`StockageImagePort` : bascule dev/prod centralisée
+    # dans `composition/adapters.py` (F2, backlog.md) pour que
+    # `composition/worker.py` retienne exactement la même règle sans la
+    # dupliquer (agents.md §1, DRY). Câblés ici (et non dans le lifespan) :
+    # aucun des deux n'a d'I/O à initialiser à la construction. Remplacer
+    # un adaptateur par un autre ne touche aucune ligne du use-case
+    # `GenererAnalyse` (D3, agents.md §4).
+    app.state.registry.register(GenerateurIAPort, build_generateur_ia(settings))
 
-    # `StockageImagePort` (E5, backlog.md) -> `StockageImageGCS` si un
-    # bucket est configuré, sinon `StockageImageFilesystem` : même bascule
-    # que `GenerateurIAPort` ci-dessus, sur le même principe (agents.md §2 —
-    # `GCS_BUCKET_IMAGES` ne sera renseignée en prod qu'une fois L4
-    # (provisionnement Terraform du bucket) fait). Remplacer l'un par
-    # l'autre ne touche aucune ligne du use-case `GenererAnalyse` (D3,
-    # agents.md §4).
-    if settings.gcs_bucket_images:
-        app.state.registry.register(
-            StockageImagePort, StockageImageGCS(bucket=settings.gcs_bucket_images)
-        )
-    else:
+    app.state.registry.register(StockageImagePort, build_stockage_image(settings))
+    if not settings.gcs_bucket_images:
+        # Sert les fichiers écrits par `StockageImageFilesystem` (branche
+        # dev de `build_stockage_image`) en HTTP : sans ce montage, l'URL
+        # renvoyée par l'adaptateur (`/images/...`) ne répondrait rien.
+        # Absent en prod (bucket GCS configuré) — les images y sont servies
+        # directement par GCS/Cloud CDN (L4), jamais par ce processus API.
+        # Concerne uniquement `api` : `worker` (composition/worker.py, F2)
+        # écrit sur le même volume mais ne sert aucune requête navigateur,
+        # donc ne monte jamais cette route. `check_dir=False` : le dossier
+        # n'est créé qu'au premier `stocker()` (adaptateur, agents.md §2
+        # YAGNI) — sans ça, `StaticFiles` lève au montage si aucune image
+        # n'a encore été générée (ex. premier boot, ou tests qui
+        # construisent l'app sans jamais déclencher d'écriture réelle).
         repertoire_images = Path(settings.local_storage_dir)
-        app.state.registry.register(
-            StockageImagePort,
-            StockageImageFilesystem(
-                repertoire=repertoire_images, url_publique_base=settings.api_public_url
-            ),
-        )
-        # Sert les fichiers écrits par `StockageImageFilesystem` en HTTP :
-        # sans ce montage, l'URL renvoyée par l'adaptateur (`/images/...`)
-        # ne répondrait rien. Absent en prod (branche GCS ci-dessus) — les
-        # images y sont servies directement par GCS/Cloud CDN (L4), jamais
-        # par ce processus API. `check_dir=False` : le dossier n'est créé
-        # qu'au premier `stocker()` (adaptateur, agents.md §2 YAGNI) —
-        # sans ça, `StaticFiles` lève au montage si aucune image n'a encore
-        # été générée (ex. premier boot, ou tests qui construisent l'app
-        # sans jamais déclencher d'écriture réelle).
         app.mount(
             "/images", StaticFiles(directory=repertoire_images, check_dir=False), name="images"
         )
@@ -156,7 +124,7 @@ def create_app() -> FastAPI:
     # propagé de bout en bout, y compris pour les réponses touchées par
     # le middleware CORS). Voir shared/correlation.py.
     app.add_middleware(CorrelationIdMiddleware)
-    _configure_error_handling(app)
+    configure_error_handling(app)
 
     for router in _routers():
         app.include_router(router)
@@ -182,59 +150,6 @@ def _configure_cors(app: FastAPI, settings: Settings) -> None:
         allow_headers=["*"],
         allow_credentials=True,
     )
-
-
-def _configure_error_handling(app: FastAPI) -> None:
-    """Centralise le mapping exception → réponse HTTP (agents.md §4, §9).
-
-    Un seul endroit connaît la correspondance entre une exception et son
-    code HTTP : une route lève une `ErreurDomaine` (ou laisse une exception
-    FastAPI standard remonter) et n'a jamais à formatter sa propre réponse
-    d'erreur ni à dupliquer un try/except (agents.md §6).
-    """
-
-    @app.exception_handler(ErreurDomaine)
-    async def _erreur_domaine(request: Request, exc: ErreurDomaine) -> JSONResponse:
-        return _reponse_erreur(request, exc.status_code, exc.code, exc.message)
-
-    @app.exception_handler(StarletteHTTPException)
-    async def _erreur_http(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        return _reponse_erreur(request, exc.status_code, "erreur_http", str(exc.detail))
-
-    @app.exception_handler(RequestValidationError)
-    async def _erreur_validation(request: Request, exc: RequestValidationError) -> JSONResponse:
-        return _reponse_erreur(
-            request,
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "entree_invalide",
-            "La requête ne respecte pas le format attendu.",
-        )
-
-    @app.exception_handler(Exception)
-    async def _erreur_inattendue(request: Request, exc: Exception) -> JSONResponse:
-        # Remplace le comportement par défaut de Starlette (page 500 non
-        # formattée) par la même enveloppe JSON que le reste des erreurs.
-        # Pas de log ici : CorrelationIdMiddleware (shared/correlation.py)
-        # journalise déjà la trace complète avant que cette exception ne
-        # remonte jusqu'ici — un second appel ferait un doublon (agents.md §2).
-        return _reponse_erreur(
-            request,
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "erreur_interne",
-            "Une erreur inattendue est survenue.",
-        )
-
-
-def _reponse_erreur(request: Request, status_code: int, code: str, message: str) -> JSONResponse:
-    # `request.state.correlation_id` (posé par CorrelationIdMiddleware avant
-    # tout traitement) est la source fiable : contrairement au contextvar,
-    # il survit même quand ce handler s'exécute après coup, au niveau du
-    # middleware le plus externe (cas du handler `Exception` ci-dessus).
-    correlation_id = getattr(request.state, "correlation_id", None) or get_correlation_id()
-    erreur = ErreurAPI(code=code, message=message, correlation_id=correlation_id)
-    response = JSONResponse(status_code=status_code, content=erreur.model_dump())
-    response.headers[CORRELATION_ID_HEADER] = correlation_id
-    return response
 
 
 def _build_lifespan(

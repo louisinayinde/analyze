@@ -53,11 +53,18 @@ services:
     build:
       context: ./back
       dockerfile: Dockerfile.dev
-    # back/src/worker.py sera créé en EPIC F (traitement async).
+    # back/src/worker.py (F2, backlog.md) : composition dédiée
+    # (composition/worker.py), même monolithe modulaire que `api`, point
+    # d'entrée différent (agents.md §4).
     command: ["uv", "run", "python", "src/worker.py"]
     volumes:
       - ./back:/app
       - /app/.venv
+      # Même volume que `api` (StockageImagePort, E5) : `worker` écrit les
+      # images générées par le job (build_stockage_image, composition/
+      # adapters.py), `api` les sert en HTTP sous `/images` — les deux
+      # doivent voir le même contenu.
+      - images_data:/app/data/images
     env_file:
       - .env
     depends_on:

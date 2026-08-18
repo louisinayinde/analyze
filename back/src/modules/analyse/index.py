@@ -1,4 +1,5 @@
 from modules.analyse.adaptateurs.api import router
+from modules.analyse.adaptateurs.api_worker import router_interne
 from modules.analyse.adaptateurs.file_jobs_cloud_tasks import FileJobsCloudTasks
 from modules.analyse.adaptateurs.file_jobs_en_processus_immediat import (
     FileJobsEnProcessusImmediat,
@@ -31,7 +32,10 @@ from modules.analyse.ports.stockage_image import StockageImagePort
 # `FileJobsEnProcessusImmediat` (dev) et `FileJobsCloudTasks` (prod, activé
 # après L7) — et `ExecuterJobGeneration`, la génération elle-même (appel
 # IA + stockage image), extraite de D3 pour devenir le corps du job
-# invoqué par l'adaptateur `FileJobsPort` retenu.
+# invoqué par l'adaptateur `FileJobsPort` retenu. F3 y ajoute
+# `router_interne` (POST /internal/jobs/analyses) : l'endpoint que le
+# `worker` (composition/worker.py) expose à Cloud Tasks, distinct de
+# `router` (jamais monté sur `worker`, réservé à `api`).
 __all__ = [
     "Analyse",
     "CachePort",
@@ -48,4 +52,5 @@ __all__ = [
     "StockageImageGCS",
     "StockageImagePort",
     "router",
+    "router_interne",
 ]
