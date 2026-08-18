@@ -16,7 +16,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-background font-sans">
+    <div className="flex flex-1 flex-col items-center justify-center gap-4">
       <h1 className="text-2xl font-semibold text-foreground">Analyse-moi ça</h1>
       <p className="text-lg text-muted-foreground">
         Statut backend :{" "}

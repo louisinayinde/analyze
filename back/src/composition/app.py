@@ -43,7 +43,43 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
 
-    app = FastAPI(lifespan=_build_lifespan(settings))
+    app = FastAPI(
+        title="Analyse-moi ça — API",
+        # Description courte, orientée consommateur du contrat (le futur
+        # client TS généré en H2, ou tout appelant tiers) — jamais le détail
+        # d'implémentation qui vit dans les docstrings internes des routes
+        # (agents.md §3 : le contrat est la source de vérité, pas le code,
+        # mais un contrat n'a pas à exposer la façon dont le code y arrive).
+        description=(
+            "Colle un texte (profil GitHub, historique Spotify, bio...) et "
+            "obtiens une analyse générée par IA, mise en cache par contenu "
+            "exact : deux appelants qui collent le même texte ne déclenchent "
+            "qu'un seul appel au fournisseur IA."
+        ),
+        # Version du contrat, alignée sur `pyproject.toml` (agents.md §3 :
+        # rétrocompatibilité via versioning explicite — H1 ne l'introduit pas
+        # encore, juste le champ qui la portera le jour où H2/un client tiers
+        # en a besoin).
+        version="0.1.0",
+        openapi_tags=[
+            {
+                "name": "auth",
+                "description": (
+                    "Inscription, connexion et rotation des jetons JWT "
+                    "(access court + refresh rotatif)."
+                ),
+            },
+            {
+                "name": "analyse",
+                "description": (
+                    "Soumission d'un texte à analyser et consultation du résultat. "
+                    "Cache exact par contenu : `200` immédiat si déjà en cache, "
+                    "`202` avec un `job_id` à poller sinon."
+                ),
+            },
+        ],
+        lifespan=_build_lifespan(settings),
+    )
     app.state.registry = Registry()
     app.state.settings = settings
 

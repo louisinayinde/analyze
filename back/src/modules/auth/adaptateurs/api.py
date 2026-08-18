@@ -5,7 +5,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from modules.auth.application.connexion import ConnecterUtilisateur
 from modules.auth.application.deconnexion import DeconnecterUtilisateur
@@ -18,6 +18,7 @@ from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
 from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
 from shared.errors import ErreurDomaine, NonAuthentifie
+from shared.openapi import responses_erreur
 
 # Adaptateur d'entrée (driving adapter, agents.md §4) : seul fichier du
 # module Auth qui connaît FastAPI. Traduit HTTP <-> cas d'usage (C3, C4),
@@ -40,6 +41,12 @@ _logger = logging.getLogger("auth")
 
 
 class InscriptionRequete(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"email": "ada@example.com", "mot_de_passe": "trombone-cheval-9"}
+        }
+    )
+
     email: str
     mot_de_passe: str
 
@@ -53,17 +60,41 @@ class ConnexionRequete(BaseModel):
     email: str
     mot_de_passe: str
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"email": "ada@example.com", "mot_de_passe": "trombone-cheval-9"}
+        }
+    )
+
 
 class RafraichissementRequete(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}}
+    )
+
     refresh_token: str
 
 
 class DeconnexionRequete(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}}
+    )
+
     refresh_token: str
 
 
 class UtilisateurReponse(BaseModel):
     """Ne reprend jamais `password_hash` : un hash n'a rien à faire dans une réponse API."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                "email": "ada@example.com",
+                "created_at": "2026-08-18T10:00:00Z",
+            }
+        }
+    )
 
     id: uuid.UUID
     email: str
@@ -75,6 +106,17 @@ class UtilisateurReponse(BaseModel):
 
 
 class JetonsReponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "expires_in": 900,
+                "token_type": "bearer",
+            }
+        }
+    )
+
     access_token: str
     refresh_token: str
     expires_in: int
@@ -196,6 +238,23 @@ async def get_current_user_optional(
     "/inscription",
     response_model=UtilisateurReponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Créer un compte",
+    response_description="Compte créé.",
+    responses=responses_erreur(
+        (
+            409,
+            "conflit_ressource",
+            "Impossible de créer le compte avec ces informations.",
+            "Un compte existe déjà avec cet email (message volontairement générique, "
+            "agents.md §7 — pas d'énumération d'utilisateurs).",
+        ),
+        (
+            422,
+            "entree_invalide",
+            "Le mot de passe doit contenir entre 10 et 128 caractères.",
+            "Email mal formé ou mot de passe jugé trop faible.",
+        ),
+    ),
 )
 async def inscription(
     corps: InscriptionRequete,
@@ -217,7 +276,21 @@ async def inscription(
     return UtilisateurReponse.depuis_domaine(utilisateur)
 
 
-@router.post("/connexion", response_model=JetonsReponse)
+@router.post(
+    "/connexion",
+    response_model=JetonsReponse,
+    summary="Se connecter",
+    response_description="Paire de jetons émise (access + refresh).",
+    responses=responses_erreur(
+        (
+            401,
+            "non_authentifie",
+            "Email ou mot de passe incorrect.",
+            "Email ou mot de passe incorrect (message générique, agents.md §7 — "
+            "ne distingue jamais email inconnu de mot de passe erroné).",
+        ),
+    ),
+)
 async def connexion(
     corps: ConnexionRequete,
     use_case: ConnecterUtilisateur = Depends(_connecter_utilisateur),
@@ -242,7 +315,21 @@ async def connexion(
     return JetonsReponse.depuis_domaine(jetons)
 
 
-@router.post("/refresh", response_model=JetonsReponse)
+@router.post(
+    "/refresh",
+    response_model=JetonsReponse,
+    summary="Rafraîchir la paire de jetons",
+    response_description="Nouvelle paire de jetons, dans la même famille de rotation.",
+    responses=responses_erreur(
+        (
+            401,
+            "non_authentifie",
+            "Refresh token invalide ou expiré.",
+            "Refresh token invalide, expiré, ou déjà utilisé — un rejeu détecté "
+            "révoque toute la famille de jetons et force une reconnexion (agents.md §7).",
+        ),
+    ),
+)
 async def refresh(
     corps: RafraichissementRequete,
     use_case: RafraichirJetons = Depends(_rafraichir_jetons),
@@ -277,7 +364,14 @@ async def refresh(
     return JetonsReponse.depuis_domaine(jetons)
 
 
-@router.post("/deconnexion", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/deconnexion",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Se déconnecter",
+    response_description=(
+        "Refresh token courant révoqué (toujours 204, même si déjà invalide — idempotent)."
+    ),
+)
 async def deconnexion(
     corps: DeconnexionRequete,
     use_case: DeconnecterUtilisateur = Depends(_deconnecter_utilisateur),

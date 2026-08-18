@@ -48,7 +48,24 @@ def create_worker_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
 
-    app = FastAPI(lifespan=_build_lifespan(settings))
+    app = FastAPI(
+        title="Analyse-moi ça — Worker (interne)",
+        description=(
+            "Endpoint interne appelé uniquement par Cloud Tasks (F3, backlog.md) — "
+            "jamais par le frontend ni un client tiers, donc hors du contrat public "
+            "généré en H2."
+        ),
+        version="0.1.0",
+        openapi_tags=[
+            {
+                "name": "worker",
+                "description": (
+                    "Réception des tâches de génération, authentifiée par jeton OIDC Cloud Tasks."
+                ),
+            }
+        ],
+        lifespan=_build_lifespan(settings),
+    )
     app.state.registry = Registry()
     app.state.settings = settings
 

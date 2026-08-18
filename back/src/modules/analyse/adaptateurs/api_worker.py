@@ -17,6 +17,7 @@ from modules.analyse.ports.generateur_ia import GenerateurIAPort
 from modules.analyse.ports.stockage_image import StockageImagePort
 from shared.config import Settings
 from shared.errors import AccesRefuse
+from shared.openapi import responses_erreur
 
 # Adaptateur d'entrée (driving adapter, agents.md §4), distinct de
 # `adaptateurs/api.py` : celui-ci ne reçoit jamais de requête navigateur,
@@ -124,6 +125,16 @@ def _executer_job_generation(request: Request) -> ExecuterJobGeneration:
     "/analyses",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(verifier_origine_cloud_tasks)],
+    summary="Recevoir une tâche de génération (Cloud Tasks uniquement)",
+    response_description="Génération exécutée, `cache_resultat` mis à jour (`done` ou `failed`).",
+    responses=responses_erreur(
+        (
+            403,
+            "acces_refuse",
+            "Jeton OIDC non autorisé pour cet endpoint.",
+            "Jeton OIDC absent, invalide, ou signé par un compte de service inattendu.",
+        ),
+    ),
 )
 async def recevoir_tache_analyse(
     corps: TacheAnalyseRequete,

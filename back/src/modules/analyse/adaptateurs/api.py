@@ -2,7 +2,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from modules.analyse.application.generer_analyse import GenererAnalyse
 from modules.analyse.application.obtenir_statut_analyse import ObtenirStatutAnalyse
@@ -11,6 +11,7 @@ from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.file_jobs import FileJobsPort
 from modules.auth.index import get_current_user_optional
 from modules.ratelimit.index import limiter_debit_ip_anonyme, limiter_debit_user_authentifie
+from shared.openapi import responses_erreur
 
 # Adaptateur d'entrée (driving adapter, agents.md §4) : seul fichier du
 # module Analyse qui connaît FastAPI. Traduit HTTP <-> cas d'usage `
@@ -30,6 +31,16 @@ _logger = logging.getLogger("analyse")
 
 
 class AnalyseRequete(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "texte": "Contribue surtout à des side-projects Python le week-end, "
+                "jamais de PR le vendredi soir.",
+                "source_type": "github",
+            }
+        }
+    )
+
     texte: str
     source_type: SourceAnalyse
 
@@ -44,6 +55,17 @@ class AnalyseTermineeReponse(BaseModel):
     si done)` demandée par ce ticket, `statut` portant `PENDING`/`FAILED`
     avec les deux champs résultat à `None` dans ces cas.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                "statut": "done",
+                "resultat_texte": "Un profil qui code le week-end mais respecte son vendredi soir.",
+                "resultat_image_url": "https://cdn.example.com/images/3fa85f64.png",
+            }
+        }
+    )
 
     id: uuid.UUID
     statut: StatutAnalyse
@@ -64,6 +86,10 @@ class AnalyseEnAttenteReponse(BaseModel):
     """Réponse `202` — le résultat n'est pas encore prêt, le client poll
     `GET /analyses/{id}/statut` (D5) avec ce `job_id`.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"job_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"}}
+    )
 
     job_id: uuid.UUID
 
@@ -97,6 +123,28 @@ def _generer_analyse(request: Request) -> GenererAnalyse:
     # que `verifier_origine_cloud_tasks`
     # (modules/analyse/adaptateurs/api_worker.py).
     dependencies=[Depends(limiter_debit_ip_anonyme), Depends(limiter_debit_user_authentifie)],
+    summary="Soumettre un texte à analyser",
+    response_description=(
+        "`200` si le résultat est déjà en cache (contenu identique déjà "
+        "analysé), `202` avec un `job_id` si la génération vient d'être "
+        "déclenchée — à poller via `GET /analyses/{id}/statut`."
+    ),
+    responses=responses_erreur(
+        (
+            422,
+            "entree_invalide",
+            "Le texte à analyser ne peut pas être vide.",
+            "Texte vide, uniquement composé d'espaces, ou dépassant 5000 caractères.",
+        ),
+        (
+            429,
+            "limite_debit_depassee",
+            "Trop de requêtes, réessaie dans quelques instants.",
+            "Quota dépassé (par IP pour un appelant anonyme, par compte pour un "
+            "appelant authentifié) — message générique, ne révèle jamais le "
+            "quota exact (agents.md §7).",
+        ),
+    ),
 )
 async def creer_analyse(
     corps: AnalyseRequete,
@@ -134,7 +182,20 @@ def _obtenir_statut_analyse(request: Request) -> ObtenirStatutAnalyse:
     return ObtenirStatutAnalyse(cache=registry.resolve(CachePort))
 
 
-@router.get("/{analyse_id}/statut", response_model=AnalyseTermineeReponse)
+@router.get(
+    "/{analyse_id}/statut",
+    response_model=AnalyseTermineeReponse,
+    summary="Consulter le statut d'une analyse",
+    response_description="Statut courant (`pending`/`done`/`failed`), résultat inclus si `done`.",
+    responses=responses_erreur(
+        (
+            404,
+            "ressource_introuvable",
+            "Aucune analyse ne correspond à cet identifiant.",
+            "Aucune analyse ne correspond à cet identifiant.",
+        ),
+    ),
+)
 async def obtenir_statut_analyse(
     analyse_id: uuid.UUID,
     use_case: ObtenirStatutAnalyse = Depends(_obtenir_statut_analyse),
