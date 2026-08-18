@@ -114,10 +114,19 @@ class Settings(BaseSettings):
     # plutôt que punitif (agents.md §2 — le budget protège contre l'abus,
     # pas contre l'usager légitime) ; ajustable par env sans changement de
     # code. Ne couvre que les appelants anonymes : un appelant authentifié
-    # aura son propre quota, généralement plus généreux, par `user_id`
-    # (G3), pas encore câblé.
+    # a son propre quota par `user_id`, ci-dessous (G3).
     rate_limit_analyses_ip_capacite: int = 5
     rate_limit_analyses_ip_taux_par_minute: float = 5.0
+
+    # Quota dédié aux appelants authentifiés de `POST /analyses` (G3,
+    # backlog.md), appliqué par `user_id` plutôt que par IP : un compte est
+    # plus coûteux à créer en masse qu'une IP (inscription via C3, pas
+    # d'énumération d'utilisateurs), donc moins risqué d'abus — d'où un
+    # quota volontairement plus généreux que `rate_limit_analyses_ip_*`
+    # (agents.md §2, même logique que le commentaire ci-dessus). Ajustable
+    # par env sans changement de code, comme son équivalent IP.
+    rate_limit_analyses_user_capacite: int = 20
+    rate_limit_analyses_user_taux_par_minute: float = 20.0
 
     @property
     def cors_origins_list(self) -> list[str]:

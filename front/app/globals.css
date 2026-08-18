@@ -1,26 +1,128 @@
 @import "tailwindcss";
 
+/* Thème piloté par la classe `.dark` sur <html> (posée par shared/theme),
+   plutôt que par `prefers-color-scheme` seul, pour supporter un choix
+   explicite clair/sombre/système (agents.md §5). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Valeurs brutes par thème. Une seule source de vérité par couleur : on ne
+   code jamais un hex directement dans un composant (agents.md §5). Chaque
+   paire fond/texte respecte au moins WCAG AA (4.5:1 texte normal, agents.md
+   §5). */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #ffffff;
+  --fg: #18181b;
+
+  --surface: #f9fafb;
+  --surface-fg: #18181b;
+
+  --muted: #f4f4f5;
+  --muted-fg: #71717a;
+
+  --border: #e4e4e7;
+
+  --primary: #c2410c;
+  --primary-fg: #ffffff;
+
+  --secondary: #f4f4f5;
+  --secondary-fg: #18181b;
+
+  --destructive: #dc2626;
+  --destructive-fg: #ffffff;
+
+  --success: #15803d;
+  --success-fg: #ffffff;
+
+  --warning: #b45309;
+  --warning-fg: #ffffff;
+
+  --ring: var(--primary);
 }
 
+.dark {
+  --bg: #0a0a0b;
+  --fg: #f4f4f5;
+
+  --surface: #18181b;
+  --surface-fg: #f4f4f5;
+
+  --muted: #27272a;
+  --muted-fg: #a1a1aa;
+
+  --border: #27272a;
+
+  --primary: #fb923c;
+  --primary-fg: #1c1410;
+
+  --secondary: #27272a;
+  --secondary-fg: #f4f4f5;
+
+  --destructive: #f87171;
+  --destructive-fg: #1c0a0a;
+
+  --success: #4ade80;
+  --success-fg: #052e16;
+
+  --warning: #fbbf24;
+  --warning-fg: #1c1410;
+
+  --ring: var(--primary);
+}
+
+/* Expose les tokens comme utilitaires Tailwind (bg-primary, text-muted-foreground,
+   border-border, ring-ring, ...). Les échelles d'espacement (--spacing-*) et
+   de typographie (--text-*, --font-weight-*) restent celles, déjà centralisées,
+   du thème par défaut de Tailwind v4 — on ne les redéfinit pas en parallèle
+   (DRY/KISS, agents.md §1) : les composants doivent piocher dedans plutôt que
+   coder une taille ou une marge en dur. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+
+  --color-surface: var(--surface);
+  --color-surface-foreground: var(--surface-fg);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-fg);
+
+  --color-border: var(--border);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-fg);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-fg);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-fg);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-fg);
+
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-fg);
+
+  --color-ring: var(--ring);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Transition de thème instantanée et lisse (agents.md §5) : le changement de
+   classe est immédiat, seul le rendu visuel s'anime. Désactivée pour les
+   personnes qui préfèrent un mouvement réduit. */
+@media (prefers-reduced-motion: no-preference) {
+  *,
+  *::before,
+  *::after {
+    transition-property: background-color, border-color, color, fill, stroke, outline-color;
+    transition-duration: 200ms;
+    transition-timing-function: ease;
+  }
 }

@@ -94,3 +94,42 @@ async def limiter_debit_ip_anonyme(
     if not autorise:
         _logger.warning("limite_debit_ip_depassee")
         raise LimiteDebitDepassee()
+
+
+async def limiter_debit_user_authentifie(
+    request: Request,
+    limiteur: RateLimiterPort = Depends(_rate_limiter),
+    settings: Settings = Depends(_settings),
+    user_id: uuid.UUID | None = Depends(get_current_user_optional),
+) -> None:
+    """Dépendance FastAPI qui applique le quota par `user_id` aux appelants
+    authentifiés de `POST /analyses` (G3, backlog.md).
+
+    Miroir de `limiter_debit_ip_anonyme` (G2) : même port, même algorithme
+    de seau (`RateLimiterPort.consommer`), seule la politique change —
+    clé `f"user:{user_id}"` (jamais l'IP, qui peut être partagée par
+    plusieurs comptes derrière le même réseau) et quota
+    `rate_limit_analyses_user_*`, plus généreux que son équivalent IP
+    (agents.md §2, voir `shared/config.py`).
+
+    Ne s'applique qu'aux appelants authentifiés : un anonyme n'a pas de
+    `user_id` et reste couvert par `limiter_debit_ip_anonyme` uniquement —
+    chaque middleware ne porte qu'une seule politique (Single
+    Responsibility, agents.md §1), les deux étant montés côte à côte sur la
+    route (`modules/analyse/adaptateurs/api.py`).
+
+    Lève `LimiteDebitDepassee` (429) si le seau de l'utilisateur est vide ;
+    ne renvoie rien sinon.
+    """
+    if user_id is None:
+        return
+
+    cle = f"user:{user_id}"
+    autorise = await limiteur.consommer(
+        cle,
+        capacite=settings.rate_limit_analyses_user_capacite,
+        taux_recharge_par_seconde=settings.rate_limit_analyses_user_taux_par_minute / 60,
+    )
+    if not autorise:
+        _logger.warning("limite_debit_user_depassee", extra={"user_id": str(user_id)})
+        raise LimiteDebitDepassee()

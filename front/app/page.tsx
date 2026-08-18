@@ -16,19 +16,17 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-zinc-50 font-sans dark:bg-black">
-      <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-        Analyse-moi ça
-      </h1>
-      <p className="text-lg text-zinc-600 dark:text-zinc-400">
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-background font-sans">
+      <h1 className="text-2xl font-semibold text-foreground">Analyse-moi ça</h1>
+      <p className="text-lg text-muted-foreground">
         Statut backend :{" "}
         <span
           className={
             status === "ok"
-              ? "text-green-600 dark:text-green-400"
+              ? "text-success"
               : status === "error"
-                ? "text-red-600 dark:text-red-400"
-                : "text-zinc-500"
+                ? "text-destructive"
+                : "text-muted-foreground"
           }
         >
           {status === "loading" ? "vérification..." : status === "ok" ? "OK" : "indisponible"}

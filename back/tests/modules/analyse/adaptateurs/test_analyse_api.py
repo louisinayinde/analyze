@@ -96,14 +96,14 @@ def client(
     get_settings.cache_clear()
 
 
-def _access_token(client: TestClient) -> str:
+def _access_token(client: TestClient, email: str = "nouvel.user@example.com") -> str:
     client.post(
         "/auth/inscription",
-        json={"email": "nouvel.user@example.com", "mot_de_passe": MOT_DE_PASSE_ROBUSTE},
+        json={"email": email, "mot_de_passe": MOT_DE_PASSE_ROBUSTE},
     )
     reponse = client.post(
         "/auth/connexion",
-        json={"email": "nouvel.user@example.com", "mot_de_passe": MOT_DE_PASSE_ROBUSTE},
+        json={"email": email, "mot_de_passe": MOT_DE_PASSE_ROBUSTE},
     )
     access_token: str = reponse.json()["access_token"]
     return access_token
@@ -342,11 +342,13 @@ def test_analyses_seul_le_premier_maillon_de_x_forwarded_for_compte(client: Test
 
 
 def test_analyses_authentifie_n_est_pas_soumis_au_quota_ip(client: TestClient) -> None:
-    # Un appelant authentifié n'a, pour l'instant, aucune limite de débit
-    # (G3, pas encore câblé, backlog.md) — il ne doit surtout pas hériter à
-    # tort du quota IP plus restrictif pensé pour l'anonyme, même en
-    # partageant la même IP qu'un appelant anonyme qui l'a déjà épuisé
-    # (modules/ratelimit/adaptateurs/api.py.limiter_debit_ip_anonyme).
+    # Un appelant authentifié a son propre quota par `user_id` (G3), pas le
+    # quota IP pensé pour l'anonyme — il ne doit surtout pas hériter à tort
+    # de ce dernier, même en partageant la même IP qu'un appelant anonyme
+    # qui l'a déjà épuisé (modules/ratelimit/adaptateurs/api.py
+    # .limiter_debit_ip_anonyme). Le quota user par défaut (20, bien
+    # au-dessus des 3 requêtes ici) ne risque pas d'interférer avec cette
+    # assertion.
     meme_ip = {"X-Forwarded-For": "203.0.113.30"}
     for i in range(5):
         client.post(
@@ -372,6 +374,68 @@ def test_analyses_authentifie_n_est_pas_soumis_au_quota_ip(client: TestClient) -
             headers=en_tetes_authentifies,
         )
         assert reponse.status_code in (200, 202)
+
+
+def test_analyses_authentifie_depasse_le_quota_user_retourne_429(client: TestClient) -> None:
+    # Capacité par défaut (`Settings.rate_limit_analyses_user_capacite`, G3) :
+    # 20 requêtes passent, la 21e doit être refusée. Chaque requête change
+    # d'IP pour prouver que c'est bien le quota par `user_id`, pas celui par
+    # IP (G2, capacite=5), qui est en cause ici.
+    access_token = _access_token(client)
+    en_tete_auth = {"Authorization": f"Bearer {access_token}"}
+    for i in range(20):
+        reponse = client.post(
+            "/analyses",
+            json={"texte": f"texte authentifie distinct {i}", "source_type": "autre"},
+            headers={**en_tete_auth, "X-Forwarded-For": f"198.51.100.{i}"},
+        )
+        assert reponse.status_code in (200, 202)
+
+    reponse = client.post(
+        "/analyses",
+        json={"texte": "texte authentifie distinct 21", "source_type": "autre"},
+        headers={**en_tete_auth, "X-Forwarded-For": "198.51.100.21"},
+    )
+
+    assert reponse.status_code == 429
+    corps = reponse.json()
+    assert corps["code"] == "limite_debit_depassee"
+    # Même posture que le quota IP (G2) : pas de fuite du quota exact
+    # (agents.md §7).
+    assert "quota" not in corps["message"].lower()
+    assert "20" not in corps["message"]
+
+
+def test_analyses_deux_users_distincts_ont_des_quotas_independants(client: TestClient) -> None:
+    premier_token = _access_token(client, email="premier.user@example.com")
+    en_tete_premier = {"Authorization": f"Bearer {premier_token}"}
+    for i in range(20):
+        reponse = client.post(
+            "/analyses",
+            json={"texte": f"texte premier user {i}", "source_type": "autre"},
+            headers=en_tete_premier,
+        )
+        assert reponse.status_code in (200, 202)
+    assert (
+        client.post(
+            "/analyses",
+            json={"texte": "texte premier user epuise", "source_type": "autre"},
+            headers=en_tete_premier,
+        ).status_code
+        == 429
+    )
+
+    # Un second compte, même IP, n'a pas épuisé son propre seau : le seau
+    # est bien scopé par `user_id`, pas partagé entre comptes (même
+    # garantie que test_analyses_deux_ip_distinctes_ont_des_quotas_independants
+    # côté G2).
+    second_token = _access_token(client, email="second.user@example.com")
+    reponse = client.post(
+        "/analyses",
+        json={"texte": "texte second user", "source_type": "autre"},
+        headers={"Authorization": f"Bearer {second_token}"},
+    )
+    assert reponse.status_code in (200, 202)
 
 
 def test_statut_d_une_analyse_terminee_retourne_le_resultat(client: TestClient) -> None:
