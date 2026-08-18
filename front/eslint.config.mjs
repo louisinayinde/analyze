@@ -15,6 +15,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Généré depuis le contrat OpenAPI backend (H2, backlog.md) — pas de
+    // lint stylistique sur du code produit par une machine.
+    "shared/api/schema.gen.ts",
   ]),
 ]);
 

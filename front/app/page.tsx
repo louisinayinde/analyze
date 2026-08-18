@@ -1,19 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiClient, useApiRequest } from "@/shared/api";
 
 type HealthStatus = "loading" | "ok" | "error";
 
 export default function Home() {
   const [status, setStatus] = useState<HealthStatus>("loading");
+  const request = useApiRequest();
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-
-    fetch(`${apiUrl}/health`)
-      .then((res) => setStatus(res.ok ? "ok" : "error"))
+    request(apiClient.GET("/health"))
+      .then(() => setStatus("ok"))
       .catch(() => setStatus("error"));
-  }, []);
+  }, [request]);
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4">

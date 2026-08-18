@@ -1,3 +1,6 @@
 .next
 next-env.d.ts
 package-lock.json
+
+# Généré depuis le contrat OpenAPI backend (H2, backlog.md)
+shared/api/schema.gen.ts

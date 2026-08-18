@@ -61,3 +61,51 @@ jobs:
 
       - name: Typecheck (tsc)
         run: npm run typecheck
+
+  client-api-drift:
+    name: Client TS · dérive du contrat OpenAPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: back/uv.lock
+
+      - working-directory: back
+        run: uv sync --frozen
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - working-directory: front
+        run: npm ci
+
+      # Mêmes variables factices que back/tests/composition/test_openapi.py :
+      # construire le schéma OpenAPI ne fait aucune I/O (pas de lifespan,
+      # pas de connexion Postgres réelle), seule `Settings` doit trouver ses
+      # champs requis pour s'instancier.
+      - name: Régénérer le client TS (H2, backlog.md)
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci # pragma: allowlist secret
+          POSTGRES_DB: ci
+          DATABASE_URL: postgresql+asyncpg://ci:ci@localhost:5432/ci # pragma: allowlist secret
+          JWT_SIGNING_KEY: cle-de-ci-suffisamment-longue-32c
+        run: ./scripts/generate-api-client.sh
+
+      # Si cette étape trouve une différence, le contrat backend a changé
+      # sans que front/shared/api/schema.gen.ts n'ait été régénéré et
+      # committé (agents.md §3 : le contrat est la source de vérité — un
+      # client généré périmé revient à retaper les types à la main sans le
+      # savoir, exactement ce que H2 est censé éviter).
+      - name: Vérifier l'absence de dérive
+        run: |
+          git diff --exit-code -- front/shared/api/schema.gen.ts || {
+            echo "::error::front/shared/api/schema.gen.ts a dérivé du schéma OpenAPI backend. Relancez ./scripts/generate-api-client.sh et committez le résultat."
+            exit 1
+          }
