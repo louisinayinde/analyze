@@ -40,6 +40,17 @@ class DépôtUtilisateurEnMémoire(DépôtUtilisateurPort):
     ) -> None:
         self.dernieres_connexions[id_utilisateur] = horodatage
 
+    async def trouver_par_id(self, id_utilisateur: uuid.UUID) -> Utilisateur | None:
+        for utilisateur in self._par_email.values():
+            if utilisateur.id == id_utilisateur:
+                return utilisateur
+        return None
+
+    async def supprimer(self, id_utilisateur: uuid.UUID) -> None:
+        for email, utilisateur in list(self._par_email.items()):
+            if utilisateur.id == id_utilisateur:
+                del self._par_email[email]
+
 
 class DépôtRefreshTokenEnMémoire(DépôtRefreshTokenPort):
     """Faux dépôt en mémoire, partagé par les tests Auth (C6).

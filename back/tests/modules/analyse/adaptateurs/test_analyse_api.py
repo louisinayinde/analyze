@@ -4,7 +4,11 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from tests.modules.analyse.conftest import CachePortEnMémoire, StockageImageEnMémoire
+from tests.modules.analyse.conftest import (
+    CachePortEnMémoire,
+    DépôtHistoriqueEnMémoire,
+    StockageImageEnMémoire,
+)
 from tests.modules.auth.conftest import DépôtRefreshTokenEnMémoire, DépôtUtilisateurEnMémoire
 from tests.modules.ratelimit.conftest import RateLimiterPortEnMémoire
 
@@ -13,6 +17,7 @@ from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalys
 from modules.analyse.domaine.texte_analyse import TEXTE_LONGUEUR_MAX
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
+from modules.analyse.ports.historique import DépôtHistoriquePort
 from modules.analyse.ports.stockage_image import StockageImagePort
 from modules.auth.ports.depot_refresh_token import DépôtRefreshTokenPort
 from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
@@ -86,6 +91,10 @@ def client(
         app.state.registry.register(CachePort, cache)
         app.state.registry.register(GenerateurIAPort, generateur_ia)
         app.state.registry.register(StockageImagePort, StockageImageEnMémoire())
+        # `DépôtHistoriquePort` (H3) remplacé pour la même raison que
+        # `CachePort` ci-dessus : sans ça, tout appel authentifié à
+        # `POST /analyses` déclencherait une vraie connexion Postgres.
+        app.state.registry.register(DépôtHistoriquePort, DépôtHistoriqueEnMémoire())
         # `LimiteurDebitPostgres` (câblé par `create_app()`, G1) remplacé par
         # le double en mémoire (G2) : sans ça, `POST /analyses` déclencherait
         # une vraie connexion Postgres dès le premier test de ce fichier, qui

@@ -41,3 +41,28 @@ class DépôtUtilisateurPort(ABC):
     ) -> None:
         """Met à jour `last_login_at` pour l'utilisateur identifié par `id_utilisateur`."""
         ...
+
+    @abstractmethod
+    async def trouver_par_id(self, id_utilisateur: uuid.UUID) -> Utilisateur | None:
+        """Retourne l'utilisateur identifié par `id_utilisateur`, ou `None` s'il n'existe pas.
+
+        Utilisé par `SupprimerCompte` (H3) pour relire `password_hash` avant
+        la vérification renforcée : `get_current_user` (C7) ne fournit que
+        l'id, jamais l'entité complète, par choix délibéré (agents.md §7 —
+        le jeton reste stateless, aucun round-trip DB sur chaque requête
+        protégée qui n'en a pas besoin).
+        """
+        ...
+
+    @abstractmethod
+    async def supprimer(self, id_utilisateur: uuid.UUID) -> None:
+        """Supprime définitivement le compte identifié par `id_utilisateur` (H3).
+
+        Les tables dépendantes (`refresh_token`, `historique`) portent
+        `ON DELETE CASCADE` vers `user` (B6) : cette méthode n'a donc qu'à
+        supprimer la ligne `user`, la base se charge du nettoyage en
+        cascade — pas de suppression applicative dupliquée à faire ici
+        (agents.md §1, une seule source de vérité pour cette intégrité).
+        Idempotente : supprimer un id déjà absent ne lève pas.
+        """
+        ...

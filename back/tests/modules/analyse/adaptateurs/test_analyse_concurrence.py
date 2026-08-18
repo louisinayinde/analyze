@@ -3,13 +3,18 @@ from collections.abc import AsyncIterator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from tests.modules.analyse.conftest import CachePortEnMémoire, StockageImageEnMémoire
+from tests.modules.analyse.conftest import (
+    CachePortEnMémoire,
+    DépôtHistoriqueEnMémoire,
+    StockageImageEnMémoire,
+)
 from tests.modules.ratelimit.conftest import RateLimiterPortEnMémoire
 
 from composition.app import create_app
 from modules.analyse.domaine.analyse import SourceAnalyse
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
+from modules.analyse.ports.historique import DépôtHistoriquePort
 from modules.analyse.ports.stockage_image import StockageImagePort
 from modules.ratelimit.ports.rate_limiter import RateLimiterPort
 from shared.config import get_settings
@@ -79,6 +84,7 @@ async def client_concurrent(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Fi
     app.state.registry.register(CachePort, CachePortEnMémoire())
     app.state.registry.register(GenerateurIAPort, generateur_ia)
     app.state.registry.register(StockageImagePort, StockageImageEnMémoire())
+    app.state.registry.register(DépôtHistoriquePort, DépôtHistoriqueEnMémoire())
     # `LimiteurDebitPostgres` (câblé par `create_app()`, G1) remplacé par le
     # double en mémoire (G2) : même raison que
     # tests/modules/analyse/adaptateurs/test_analyse_api.py — aucune base

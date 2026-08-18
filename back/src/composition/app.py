@@ -12,9 +12,12 @@ from composition.error_handling import configure_error_handling
 from composition.registry import Registry
 from modules.analyse.domaine.analyse import Analyse
 from modules.analyse.index import (
+    DépôtHistoriquePort,
+    DépôtHistoriquePostgres,
     ExecuterJobGeneration,
     FileJobsCloudTasks,
     FileJobsEnProcessusImmediat,
+    router_historique,
 )
 from modules.analyse.index import router as analyse_router
 from modules.analyse.ports.cache import CachePort
@@ -26,6 +29,7 @@ from modules.auth.adaptateurs.depot_utilisateur_postgres import DépôtUtilisate
 from modules.auth.adaptateurs.emetteur_jwt import EmetteurJWT
 from modules.auth.adaptateurs.hacheur_argon2id import HacheurArgon2id
 from modules.auth.index import router as auth_router
+from modules.auth.index import router_compte
 from modules.auth.ports.depot_refresh_token import DépôtRefreshTokenPort
 from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
@@ -76,6 +80,17 @@ def create_app() -> FastAPI:
                     "Cache exact par contenu : `200` immédiat si déjà en cache, "
                     "`202` avec un `job_id` à poller sinon."
                 ),
+            },
+            {
+                "name": "historique",
+                "description": (
+                    "Historique personnel des analyses soumises par l'appelant "
+                    "authentifié, paginé et scopé par le `user_id` du jeton d'accès."
+                ),
+            },
+            {
+                "name": "compte",
+                "description": "Suppression du compte de l'appelant authentifié.",
             },
         ],
         lifespan=_build_lifespan(settings),
@@ -218,6 +233,13 @@ def _build_lifespan(
         # sessionmaker. Le use-case `GenererAnalyse` (D3) le résout via le
         # registre sans jamais importer `CacheResultatPostgres`.
         app.state.registry.register(CachePort, CacheResultatPostgres(app.state.db_sessionmaker))
+        # `DépôtHistoriquePort` (H3) -> adaptateur Postgres : même sessionmaker
+        # que `CachePort`/les dépôts Auth ci-dessus, câblé ici pour la même
+        # raison. `GenererAnalyse` (D3/H3) et `ListerHistorique` (H3) le
+        # résolvent via le registre sans jamais importer l'adaptateur.
+        app.state.registry.register(
+            DépôtHistoriquePort, DépôtHistoriquePostgres(app.state.db_sessionmaker)
+        )
         # `RateLimiterPort` (G1, backlog.md) -> toujours `LimiteurDebitPostgres`,
         # dev comme prod (voir sa docstring : pas de bascule dev/prod ici,
         # contrairement à `GenerateurIAPort`/`StockageImagePort`/
@@ -244,8 +266,13 @@ def _build_lifespan(
 def _routers() -> tuple[APIRouter, ...]:
     # Chaque module expose son router via son `index.py` (agents.md §4).
     # Complété au fil des modules (C5 pour auth ; D4 puis D5 pour analyse,
-    # les deux routes de ce dernier partageant le même `APIRouter`).
-    return (auth_router, analyse_router)
+    # les deux routes de ce dernier partageant le même `APIRouter`). H3 y
+    # ajoute deux `APIRouter` supplémentaires, un par module mais distincts
+    # de `auth_router`/`analyse_router` : `router_historique` (GET
+    # /historique, module analyse) et `router_compte` (DELETE /compte,
+    # module auth) ne partagent le préfixe d'aucun des deux routers
+    # existants.
+    return (auth_router, router_compte, analyse_router, router_historique)
 
 
 def _mount_health(app: FastAPI) -> None:

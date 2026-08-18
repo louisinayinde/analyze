@@ -1,8 +1,11 @@
 import uuid
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from modules.analyse.domaine.analyse import Analyse, StatutAnalyse
+from modules.analyse.domaine.entree_historique import EntreeHistorique
 from modules.analyse.ports.cache import CachePort
+from modules.analyse.ports.historique import DépôtHistoriquePort
 from modules.analyse.ports.stockage_image import StockageImagePort
 
 
@@ -66,3 +69,39 @@ class StockageImageEnMémoire(StockageImagePort):
     async def stocker(self, contenu: bytes, cle: str) -> str:
         self.contenus[cle] = contenu
         return f"memoire://{cle}"
+
+
+class DépôtHistoriqueEnMémoire(DépôtHistoriquePort):
+    """Faux `DépôtHistoriquePort` en mémoire, partagé par les tests Analyse (H3).
+
+    Isole `GenererAnalyse`/`ListerHistorique` du réseau/DB (agents.md §6) —
+    même raisonnement que `CachePortEnMémoire` ci-dessus.
+    """
+
+    def __init__(self) -> None:
+        self.entrees: list[EntreeHistorique] = []
+        # `user_id` n'est pas porté par `EntreeHistorique` (agents.md §4 —
+        # le domaine ne porte que ce dont l'appelant a besoin en retour) ;
+        # ce faux dépôt le garde à part pour pouvoir filtrer dans
+        # `lister_par_utilisateur`, comme le ferait une vraie clause `WHERE`.
+        self._proprietaires: dict[uuid.UUID, uuid.UUID] = {}
+
+    async def enregistrer(
+        self, user_id: uuid.UUID, resultat_id: uuid.UUID, input_text: str
+    ) -> None:
+        entree = EntreeHistorique(
+            id=uuid.uuid4(),
+            resultat_id=resultat_id,
+            input_text=input_text,
+            created_at=datetime.now(UTC),
+        )
+        self.entrees.append(entree)
+        self._proprietaires[entree.id] = user_id
+
+    async def lister_par_utilisateur(
+        self, user_id: uuid.UUID, page: int, page_size: int
+    ) -> tuple[list[EntreeHistorique], int]:
+        siennes = [e for e in self.entrees if self._proprietaires[e.id] == user_id]
+        siennes.sort(key=lambda e: e.created_at, reverse=True)
+        debut = (page - 1) * page_size
+        return siennes[debut : debut + page_size], len(siennes)

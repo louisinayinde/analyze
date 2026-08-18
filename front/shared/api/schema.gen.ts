@@ -106,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/compte": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Supprimer son compte */
+        delete: operations["supprimer_compte_compte_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -115,6 +132,23 @@ export interface paths {
         };
         /** Health */
         get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/historique": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Consulter son historique personnel */
+        get: operations["lister_historique_historique_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -207,6 +241,34 @@ export interface components {
             refresh_token: string;
         };
         /**
+         * EntreeHistoriqueReponse
+         * @example {
+         *       "created_at": "2026-08-18T10:00:00Z",
+         *       "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+         *       "input_text": "Contribue surtout à des side-projects Python le week-end.",
+         *       "resultat_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+         *     }
+         */
+        EntreeHistoriqueReponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Text */
+            input_text: string;
+            /**
+             * Resultat Id
+             * Format: uuid
+             */
+            resultat_id: string;
+        };
+        /**
          * ErreurAPI
          * @description Format de réponse unique pour toute erreur API (agents.md §3, §9).
          *
@@ -226,6 +288,32 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HistoriquePageReponse
+         * @example {
+         *       "items": [
+         *         {
+         *           "created_at": "2026-08-18T10:00:00Z",
+         *           "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+         *           "input_text": "Contribue surtout à des side-projects Python le week-end.",
+         *           "resultat_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+         *         }
+         *       ],
+         *       "page": 1,
+         *       "page_size": 20,
+         *       "total": 1
+         *     }
+         */
+        HistoriquePageReponse: {
+            /** Items */
+            items: components["schemas"]["EntreeHistoriqueReponse"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
         };
         /**
          * InscriptionRequete
@@ -291,6 +379,17 @@ export interface components {
          * @enum {string}
          */
         StatutAnalyse: "pending" | "done" | "failed";
+        /**
+         * SuppressionCompteRequete
+         * @description Redemande le mot de passe (vérification renforcée, H3, agents.md §7).
+         * @example {
+         *       "mot_de_passe": "trombone-cheval-9"
+         *     }
+         */
+        SuppressionCompteRequete: {
+            /** Mot De Passe */
+            mot_de_passe: string;
+        };
         /**
          * UtilisateurReponse
          * @description Ne reprend jamais `password_hash` : un hash n'a rien à faire dans une réponse API.
@@ -624,6 +723,53 @@ export interface operations {
             };
         };
     };
+    supprimer_compte_compte_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuppressionCompteRequete"];
+            };
+        };
+        responses: {
+            /** @description Compte, refresh tokens et historique personnel supprimés (cascade au niveau du schéma, B6). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Non authentifié, ou mot de passe incorrect (message générique, agents.md §7 — même posture que /auth/connexion). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "non_authentifie",
+                     *       "correlation_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                     *       "message": "Mot de passe incorrect."
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErreurAPI"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_health_get: {
         parameters: {
             query?: never;
@@ -642,6 +788,54 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    lister_historique_historique_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page de l'historique de l'appelant authentifié, du plus récent au plus ancien. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoriquePageReponse"];
+                };
+            };
+            /** @description Aucun jeton présenté, ou jeton invalide/expiré. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "non_authentifie",
+                     *       "correlation_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                     *       "message": "Authentification requise."
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErreurAPI"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

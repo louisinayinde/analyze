@@ -9,6 +9,7 @@ from modules.analyse.application.obtenir_statut_analyse import ObtenirStatutAnal
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.file_jobs import FileJobsPort
+from modules.analyse.ports.historique import DépôtHistoriquePort
 from modules.auth.index import get_current_user_optional
 from modules.ratelimit.index import limiter_debit_ip_anonyme, limiter_debit_user_authentifie
 from shared.openapi import responses_erreur
@@ -106,6 +107,7 @@ def _generer_analyse(request: Request) -> GenererAnalyse:
     return GenererAnalyse(
         cache=registry.resolve(CachePort),
         file_jobs=registry.resolve(FileJobsPort),
+        historique=registry.resolve(DépôtHistoriquePort),
     )
 
 
@@ -152,7 +154,7 @@ async def creer_analyse(
     use_case: GenererAnalyse = Depends(_generer_analyse),
     user_id: uuid.UUID | None = Depends(get_current_user_optional),
 ) -> AnalyseTermineeReponse | AnalyseEnAttenteReponse:
-    analyse = await use_case.executer(corps.texte, corps.source_type)
+    analyse = await use_case.executer(corps.texte, corps.source_type, user_id)
 
     # Le statut renvoyé par le use-case (D3) décide seul du code HTTP : pas
     # de branchement sur le fait que cet appel ait ou non créé la ligne de

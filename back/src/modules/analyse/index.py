@@ -1,5 +1,7 @@
 from modules.analyse.adaptateurs.api import router
+from modules.analyse.adaptateurs.api_historique import router as router_historique
 from modules.analyse.adaptateurs.api_worker import router_interne
+from modules.analyse.adaptateurs.depot_historique_postgres import DépôtHistoriquePostgres
 from modules.analyse.adaptateurs.file_jobs_cloud_tasks import FileJobsCloudTasks
 from modules.analyse.adaptateurs.file_jobs_en_processus_immediat import (
     FileJobsEnProcessusImmediat,
@@ -8,11 +10,14 @@ from modules.analyse.adaptateurs.stockage_image_filesystem import StockageImageF
 from modules.analyse.adaptateurs.stockage_image_gcs import StockageImageGCS
 from modules.analyse.application.executer_job_generation import ExecuterJobGeneration
 from modules.analyse.application.generer_analyse import GenererAnalyse
+from modules.analyse.application.lister_historique import ListerHistorique
 from modules.analyse.application.obtenir_statut_analyse import ObtenirStatutAnalyse
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
+from modules.analyse.domaine.entree_historique import EntreeHistorique
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.file_jobs import FileJobsPort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
+from modules.analyse.ports.historique import DépôtHistoriquePort
 from modules.analyse.ports.stockage_image import StockageImagePort
 
 # Seule surface publique du module (agents.md §4). D1 expose l'entité, son
@@ -35,16 +40,23 @@ from modules.analyse.ports.stockage_image import StockageImagePort
 # invoqué par l'adaptateur `FileJobsPort` retenu. F3 y ajoute
 # `router_interne` (POST /internal/jobs/analyses) : l'endpoint que le
 # `worker` (composition/worker.py) expose à Cloud Tasks, distinct de
-# `router` (jamais monté sur `worker`, réservé à `api`).
+# `router` (jamais monté sur `worker`, réservé à `api`). H3 y ajoute
+# `DépôtHistoriquePort`/`DépôtHistoriquePostgres`, `ListerHistorique` et
+# `router_historique` (GET /historique, prefix distinct de `router`) —
+# `GenererAnalyse` y gagne aussi la dépendance `DépôtHistoriquePort`.
 __all__ = [
     "Analyse",
     "CachePort",
+    "DépôtHistoriquePort",
+    "DépôtHistoriquePostgres",
+    "EntreeHistorique",
     "ExecuterJobGeneration",
     "FileJobsCloudTasks",
     "FileJobsEnProcessusImmediat",
     "FileJobsPort",
     "GenerateurIAPort",
     "GenererAnalyse",
+    "ListerHistorique",
     "ObtenirStatutAnalyse",
     "SourceAnalyse",
     "StatutAnalyse",
@@ -52,5 +64,6 @@ __all__ = [
     "StockageImageGCS",
     "StockageImagePort",
     "router",
+    "router_historique",
     "router_interne",
 ]

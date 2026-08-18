@@ -28,12 +28,13 @@ def schema(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return result
 
 
-def test_openapi_declare_les_tags_auth_et_analyse(schema: dict[str, Any]) -> None:
+def test_openapi_declare_tous_les_tags(schema: dict[str, Any]) -> None:
     # H1 (backlog.md) : le contrat devient la source de vérité (agents.md
     # §3) — sans tags décrits, `/docs` et le futur client généré (H2) ne
-    # regroupent pas les endpoints par domaine métier.
+    # regroupent pas les endpoints par domaine métier. `historique`/`compte`
+    # ajoutés par H3.
     noms_tags = {tag["name"] for tag in schema["tags"]}
-    assert noms_tags == {"auth", "analyse"}
+    assert noms_tags == {"auth", "analyse", "historique", "compte"}
     assert all(tag["description"] for tag in schema["tags"])
 
 
@@ -45,6 +46,8 @@ def test_openapi_declare_les_tags_auth_et_analyse(schema: dict[str, Any]) -> Non
         ("/auth/refresh", "post", {"401"}),
         ("/analyses", "post", {"422", "429"}),
         ("/analyses/{analyse_id}/statut", "get", {"404"}),
+        ("/historique", "get", {"401"}),
+        ("/compte", "delete", {"401"}),
     ],
 )
 def test_chaque_endpoint_documente_ses_erreurs_reelles(

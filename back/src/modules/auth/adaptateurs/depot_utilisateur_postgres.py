@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -56,6 +56,23 @@ class DépôtUtilisateurPostgres(DépôtUtilisateurPort):
                 update(UtilisateurModel)
                 .where(UtilisateurModel.id == id_utilisateur)
                 .values(last_login_at=horodatage)
+            )
+            await session.commit()
+
+    async def trouver_par_id(self, id_utilisateur: uuid.UUID) -> Utilisateur | None:
+        async with self._sessionmaker() as session:
+            resultat = await session.execute(
+                select(UtilisateurModel).where(UtilisateurModel.id == id_utilisateur)
+            )
+            modele = resultat.scalar_one_or_none()
+        return _vers_domaine(modele) if modele is not None else None
+
+    async def supprimer(self, id_utilisateur: uuid.UUID) -> None:
+        # `ON DELETE CASCADE` (B6) nettoie `refresh_token`/`historique` côté
+        # base : un seul DELETE ici suffit (agents.md §1).
+        async with self._sessionmaker() as session:
+            await session.execute(
+                delete(UtilisateurModel).where(UtilisateurModel.id == id_utilisateur)
             )
             await session.commit()
 

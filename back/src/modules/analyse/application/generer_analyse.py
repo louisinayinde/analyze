@@ -5,6 +5,7 @@ from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalys
 from modules.analyse.domaine.texte_analyse import valider_et_nettoyer_texte
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.file_jobs import FileJobsPort
+from modules.analyse.ports.historique import DépôtHistoriquePort
 
 
 class GenererAnalyse:
@@ -32,13 +33,28 @@ class GenererAnalyse:
     du cache et le déclenchement du job, jamais la génération en direct
     (c'est tout l'objet du port `FileJobsPort` — avant F1, l'appel était
     fait ici en synchrone, direct, en attendant que ce ticket existe).
+
+    H3 y ajoute l'écriture de l'historique personnel : quand `user_id` est
+    fourni (appelant authentifié), une ligne est enregistrée via
+    `DépôtHistoriquePort`, quelle que soit la branche empruntée ci-dessous
+    (cache-hit, cache-miss ou ligne déjà `pending`) — c'est un journal de ce
+    que *cet* utilisateur a soumis, pas un ensemble dédupliqué de résultats
+    partagés (cf. docstring de `DépôtHistoriquePort`). Fait ici plutôt que
+    dans la route (`creer_analyse`, D4) : c'est l'endroit documenté depuis
+    B6 (`HistoriqueModel`), et ça couvre tout futur appelant du use-case
+    sans qu'il ait à y repenser (agents.md §1, DRY).
     """
 
-    def __init__(self, cache: CachePort, file_jobs: FileJobsPort) -> None:
+    def __init__(
+        self, cache: CachePort, file_jobs: FileJobsPort, historique: DépôtHistoriquePort
+    ) -> None:
         self._cache = cache
         self._file_jobs = file_jobs
+        self._historique = historique
 
-    async def executer(self, texte_source: str, source: SourceAnalyse) -> Analyse:
+    async def executer(
+        self, texte_source: str, source: SourceAnalyse, user_id: uuid.UUID | None = None
+    ) -> Analyse:
         # D7 (backlog.md) : longueur, vide/whitespace et sanitisation
         # anti prompt-injection grossière, appliquées ici pour couvrir tout
         # appelant du use-case, pas seulement `POST /analyses` (D4).
@@ -70,15 +86,23 @@ class GenererAnalyse:
             # (prod) retourne dès l'enfilage de la tâche — la relecture voit
             # encore `pending`, ce qui est le `202` attendu pour un
             # cache-miss réellement asynchrone.
-            return await self._cache.obtenir_par_id(analyse.id) or analyse
-
-        if analyse.statut is StatutAnalyse.DONE:
+            resultat = await self._cache.obtenir_par_id(analyse.id) or analyse
+        elif analyse.statut is StatutAnalyse.DONE:
             # Étape 3 : résultat déjà en cache, aucun nouvel appel IA.
             await self._cache.incrementer_hit_count(analyse)
-            return analyse
+            resultat = analyse
+        else:
+            # Étape 4 : la ligne existe déjà en `pending` (un autre appelant a
+            # déjà déclenché le job) — ou en `failed` (hors du périmètre de
+            # retry de ce ticket, voir E4). Dans les deux cas, pas de nouveau
+            # dispatch : l'appelant renvoie 202 et laisse le client poller.
+            resultat = analyse
 
-        # Étape 4 : la ligne existe déjà en `pending` (un autre appelant a
-        # déjà déclenché le job) — ou en `failed` (hors du périmètre de
-        # retry de ce ticket, voir E4). Dans les deux cas, pas de nouveau
-        # dispatch : l'appelant renvoie 202 et laisse le client poller.
-        return analyse
+        if user_id is not None:
+            # H3 : journal personnel, écrit dans les 4 branches ci-dessus
+            # sans distinction (cf. docstring de la classe) — `resultat.id`
+            # est toujours l'id du résultat partagé (`cache_resultat`),
+            # stable quel que soit son statut au moment de l'écriture.
+            await self._historique.enregistrer(user_id, resultat.id, texte_source)
+
+        return resultat
