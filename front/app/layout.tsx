@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AuthProvider } from "@/features/auth";
 import { SiteShell } from "@/shared/layout";
 import { ThemeProvider, ThemeScript } from "@/shared/theme";
 import { ToastProvider } from "@/shared/ui";
@@ -31,7 +32,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeScript />
         <ThemeProvider>
           <ToastProvider>
-            <SiteShell>{children}</SiteShell>
+            <AuthProvider>
+              <SiteShell>{children}</SiteShell>
+            </AuthProvider>
           </ToastProvider>
         </ThemeProvider>
       </body>

@@ -4,7 +4,8 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { apiClient, ApiError, useApiRequest } from "@/shared/api";
+import { useAuth } from "@/features/auth";
+import { ApiError, useApiRequest } from "@/shared/api";
 import {
   Button,
   Card,
@@ -36,6 +37,7 @@ function validerMotDePasse(motDePasse: string): string | undefined {
 export default function ConnexionPage() {
   const router = useRouter();
   const request = useApiRequest();
+  const { login } = useAuth();
 
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
@@ -58,16 +60,12 @@ export default function ConnexionPage() {
 
     setEnvoiEnCours(true);
     try {
-      // La paire de jetons renvoyée ici n'est pas encore persistée : sa
-      // gestion (access en mémoire, refresh en cookie httpOnly, refresh
-      // silencieux) est le sujet propre de J3 (backlog.md), qui dépend de
-      // cette page ET du refresh rotatif backend (C6). Tant que J3 n'est
-      // pas câblé, une connexion réussie confirme juste les identifiants.
-      await request(
-        apiClient.POST("/auth/connexion", {
-          body: { email, mot_de_passe: motDePasse },
-        }),
-      );
+      // `login` (features/auth, J3) passe par le Route Handler
+      // `app/api/auth/connexion` : c'est lui qui pose le refresh token en
+      // cookie httpOnly, jamais visible ici. L'access token part en mémoire
+      // (token-store.ts) et un rafraîchissement silencieux est planifié
+      // avant son expiration.
+      await request(login(email, motDePasse));
       router.push("/");
     } catch (error) {
       // 401 générique du contrat (`schema.gen.ts`) : le backend ne dit
