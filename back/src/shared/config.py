@@ -105,6 +105,20 @@ class Settings(BaseSettings):
     worker_internal_url: str = ""
     worker_service_account_email: str = ""
 
+    # `RateLimiterPort` (G1) appliqué par IP aux appelants anonymes de
+    # `POST /analyses` (G2, backlog.md — l'endpoint qui peut coûter cher,
+    # un appel LLM par génération). `capacite` est le burst autorisé,
+    # `taux_par_minute` le débit soutenu au-delà : une poignée de requêtes
+    # d'affilée passe (usage légitime en rafale), un script qui matraque
+    # l'endpoint retombe vite au débit soutenu. Volontairement généreux
+    # plutôt que punitif (agents.md §2 — le budget protège contre l'abus,
+    # pas contre l'usager légitime) ; ajustable par env sans changement de
+    # code. Ne couvre que les appelants anonymes : un appelant authentifié
+    # aura son propre quota, généralement plus généreux, par `user_id`
+    # (G3), pas encore câblé.
+    rate_limit_analyses_ip_capacite: int = 5
+    rate_limit_analyses_ip_taux_par_minute: float = 5.0
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

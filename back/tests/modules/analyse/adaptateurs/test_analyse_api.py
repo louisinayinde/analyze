@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from tests.modules.analyse.conftest import CachePortEnMémoire, StockageImageEnMémoire
 from tests.modules.auth.conftest import DépôtRefreshTokenEnMémoire, DépôtUtilisateurEnMémoire
+from tests.modules.ratelimit.conftest import RateLimiterPortEnMémoire
 
 from composition.app import create_app
 from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalyse
@@ -20,6 +21,7 @@ from modules.ia.adaptateurs.generateur_ia_avec_circuit_breaker import (
     GenerateurIAAvecCircuitBreaker,
 )
 from modules.ia.adaptateurs.generateur_ia_factice import GenerateurIAFactice
+from modules.ratelimit.ports.rate_limiter import RateLimiterPort
 from shared.config import get_settings
 
 MOT_DE_PASSE_ROBUSTE = "cheval-trombone-9"
@@ -49,10 +51,16 @@ def cache() -> CachePortEnMémoire:
 
 
 @pytest.fixture
+def rate_limiter() -> RateLimiterPortEnMémoire:
+    return RateLimiterPortEnMémoire()
+
+
+@pytest.fixture
 def client(
     monkeypatch: pytest.MonkeyPatch,
     cache: CachePortEnMémoire,
     generateur_ia: GenerateurIAFactice,
+    rate_limiter: RateLimiterPortEnMémoire,
 ) -> Iterator[TestClient]:
     # Même montage que `tests/modules/auth/adaptateurs/test_api.py` : les
     # variables d'environnement ne servent qu'à satisfaire `Settings` au
@@ -78,6 +86,11 @@ def client(
         app.state.registry.register(CachePort, cache)
         app.state.registry.register(GenerateurIAPort, generateur_ia)
         app.state.registry.register(StockageImagePort, StockageImageEnMémoire())
+        # `LimiteurDebitPostgres` (câblé par `create_app()`, G1) remplacé par
+        # le double en mémoire (G2) : sans ça, `POST /analyses` déclencherait
+        # une vraie connexion Postgres dès le premier test de ce fichier, qui
+        # n'a jamais démarré de base réelle (agents.md §6).
+        app.state.registry.register(RateLimiterPort, rate_limiter)
         yield test_client
 
     get_settings.cache_clear()
@@ -242,6 +255,123 @@ def test_analyses_avec_jeton_invalide_retourne_401(client: TestClient) -> None:
 
     assert reponse.status_code == 401
     assert reponse.json()["code"] == "non_authentifie"
+
+
+def test_analyses_anonyme_depasse_le_quota_ip_retourne_429(client: TestClient) -> None:
+    # Capacité par défaut (`Settings.rate_limit_analyses_ip_capacite`, G2) :
+    # 5 requêtes passent, la 6e doit être refusée. Un `X-Forwarded-For`
+    # explicite isole ce test de la vraie IP que `TestClient` attribue à
+    # ses requêtes (modules/ratelimit/adaptateurs/api.py._adresse_ip_appelante).
+    en_tete = {"X-Forwarded-For": "203.0.113.7"}
+    for i in range(5):
+        reponse = client.post(
+            "/analyses",
+            json={"texte": f"texte anonyme distinct {i}", "source_type": "autre"},
+            headers=en_tete,
+        )
+        assert reponse.status_code in (200, 202)
+
+    reponse = client.post(
+        "/analyses",
+        json={"texte": "texte anonyme distinct 6", "source_type": "autre"},
+        headers=en_tete,
+    )
+
+    assert reponse.status_code == 429
+    corps = reponse.json()
+    assert corps["code"] == "limite_debit_depassee"
+    # Message générique, jamais le quota exact ni le temps restant avant
+    # recharge (agents.md §7 — pas de fuite d'information, shared/errors.py
+    # `LimiteDebitDepassee`).
+    assert "quota" not in corps["message"].lower()
+    assert "5" not in corps["message"]
+
+
+def test_analyses_deux_ip_distinctes_ont_des_quotas_independants(client: TestClient) -> None:
+    premiere_ip = {"X-Forwarded-For": "203.0.113.10"}
+    for i in range(5):
+        reponse = client.post(
+            "/analyses",
+            json={"texte": f"texte premiere ip {i}", "source_type": "autre"},
+            headers=premiere_ip,
+        )
+        assert reponse.status_code in (200, 202)
+    assert (
+        client.post(
+            "/analyses",
+            json={"texte": "texte premiere ip epuise", "source_type": "autre"},
+            headers=premiere_ip,
+        ).status_code
+        == 429
+    )
+
+    # Une autre IP n'a pas épuisé son propre seau, même si la première est
+    # déjà à sec (même garantie que
+    # tests/modules/ratelimit/test_rate_limiter_en_memoire.py
+    # ::test_deux_cles_distinctes_ont_des_seaux_independants).
+    reponse = client.post(
+        "/analyses",
+        json={"texte": "texte seconde ip", "source_type": "autre"},
+        headers={"X-Forwarded-For": "203.0.113.20"},
+    )
+    assert reponse.status_code in (200, 202)
+
+
+def test_analyses_seul_le_premier_maillon_de_x_forwarded_for_compte(client: TestClient) -> None:
+    # Seul le premier maillon (posé par l'infrastructure de confiance en
+    # prod, ex. Cloud Run/GCLB) identifie l'appelant ; les maillons suivants
+    # peuvent avoir été ajoutés par le client lui-même et ne doivent pas
+    # permettre de faire varier la clé de seau d'une requête à l'autre pour
+    # contourner la limite (modules/ratelimit/adaptateurs/api.py
+    # ._adresse_ip_appelante).
+    for i in range(5):
+        reponse = client.post(
+            "/analyses",
+            json={"texte": f"texte multi maillons {i}", "source_type": "autre"},
+            headers={"X-Forwarded-For": f"203.0.113.40, {i}.{i}.{i}.{i}"},
+        )
+        assert reponse.status_code in (200, 202)
+
+    reponse = client.post(
+        "/analyses",
+        json={"texte": "texte multi maillons epuise", "source_type": "autre"},
+        headers={"X-Forwarded-For": "203.0.113.40, 9.9.9.9"},
+    )
+
+    assert reponse.status_code == 429
+
+
+def test_analyses_authentifie_n_est_pas_soumis_au_quota_ip(client: TestClient) -> None:
+    # Un appelant authentifié n'a, pour l'instant, aucune limite de débit
+    # (G3, pas encore câblé, backlog.md) — il ne doit surtout pas hériter à
+    # tort du quota IP plus restrictif pensé pour l'anonyme, même en
+    # partageant la même IP qu'un appelant anonyme qui l'a déjà épuisé
+    # (modules/ratelimit/adaptateurs/api.py.limiter_debit_ip_anonyme).
+    meme_ip = {"X-Forwarded-For": "203.0.113.30"}
+    for i in range(5):
+        client.post(
+            "/analyses",
+            json={"texte": f"texte anonyme partage {i}", "source_type": "autre"},
+            headers=meme_ip,
+        )
+    assert (
+        client.post(
+            "/analyses",
+            json={"texte": "texte anonyme partage epuise", "source_type": "autre"},
+            headers=meme_ip,
+        ).status_code
+        == 429
+    )
+
+    access_token = _access_token(client)
+    en_tetes_authentifies = {**meme_ip, "Authorization": f"Bearer {access_token}"}
+    for i in range(3):
+        reponse = client.post(
+            "/analyses",
+            json={"texte": f"texte authentifie {i}", "source_type": "autre"},
+            headers=en_tetes_authentifies,
+        )
+        assert reponse.status_code in (200, 202)
 
 
 def test_statut_d_une_analyse_terminee_retourne_le_resultat(client: TestClient) -> None:

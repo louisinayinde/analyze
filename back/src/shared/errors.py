@@ -63,6 +63,23 @@ class AccesRefuse(ErreurDomaine):
     message_par_defaut = "Accès refusé."
 
 
+class LimiteDebitDepassee(ErreurDomaine):
+    """Levée quand `RateLimiterPort.consommer` refuse une requête (G2/G3,
+    backlog.md ; agents.md §3 — bulkheads/rate limits).
+
+    Message générique, jamais le quota exact ni le temps restant avant
+    recharge : un client (anonyme ou authentifié) ne doit pas pouvoir
+    calibrer un abus contre la limite exacte d'un autre appelant en
+    sondant les réponses (agents.md §7 — pas de fuite d'information,
+    même posture que `NonAuthentifie` qui ne distingue jamais « mauvais
+    mot de passe » de « compte inconnu »). Couvert par G4 (backlog.md).
+    """
+
+    code = "limite_debit_depassee"
+    status_code = 429
+    message_par_defaut = "Trop de requêtes, réessaie dans quelques instants."
+
+
 class ServiceIndisponible(ErreurDomaine):
     """Levée quand une dépendance externe est en incident (E4, backlog.md).
 

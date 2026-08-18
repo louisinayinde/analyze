@@ -4,12 +4,14 @@ from collections.abc import AsyncIterator
 import pytest
 from httpx import ASGITransport, AsyncClient
 from tests.modules.analyse.conftest import CachePortEnMémoire, StockageImageEnMémoire
+from tests.modules.ratelimit.conftest import RateLimiterPortEnMémoire
 
 from composition.app import create_app
 from modules.analyse.domaine.analyse import SourceAnalyse
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.generateur_ia import GenerateurIAPort
 from modules.analyse.ports.stockage_image import StockageImagePort
+from modules.ratelimit.ports.rate_limiter import RateLimiterPort
 from shared.config import get_settings
 
 
@@ -63,6 +65,13 @@ async def client_concurrent(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Fi
     _dsn_test = "postgresql+asyncpg://test:test@localhost:5432/test"  # pragma: allowlist secret
     monkeypatch.setenv("DATABASE_URL", _dsn_test)
     monkeypatch.setenv("JWT_SIGNING_KEY", "cle-de-test-suffisamment-longue-32c")
+    # Quota IP (G2) largement au-dessus du nombre de requêtes simultanées
+    # envoyées par ces tests (jusqu'à 10) : ce fichier prouve la déduplication
+    # du cache sous course, pas le rate limiting (déjà couvert par
+    # tests/modules/analyse/adaptateurs/test_analyse_api.py) — la capacité
+    # par défaut (5) ferait échouer ces requêtes anonymes sur un motif sans
+    # rapport avec ce que le test vérifie.
+    monkeypatch.setenv("RATE_LIMIT_ANALYSES_IP_CAPACITE", "50")
     get_settings.cache_clear()
 
     app = create_app()
@@ -70,6 +79,11 @@ async def client_concurrent(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Fi
     app.state.registry.register(CachePort, CachePortEnMémoire())
     app.state.registry.register(GenerateurIAPort, generateur_ia)
     app.state.registry.register(StockageImagePort, StockageImageEnMémoire())
+    # `LimiteurDebitPostgres` (câblé par `create_app()`, G1) remplacé par le
+    # double en mémoire (G2) : même raison que
+    # tests/modules/analyse/adaptateurs/test_analyse_api.py — aucune base
+    # Postgres réelle n'est démarrée pour ces tests.
+    app.state.registry.register(RateLimiterPort, RateLimiterPortEnMémoire())
 
     # `httpx.AsyncClient` (et non `TestClient`, synchrone) : seul un client
     # asynchrone permet de lancer deux requêtes *réellement* en même temps

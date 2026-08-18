@@ -10,6 +10,7 @@ from modules.analyse.domaine.analyse import Analyse, SourceAnalyse, StatutAnalys
 from modules.analyse.ports.cache import CachePort
 from modules.analyse.ports.file_jobs import FileJobsPort
 from modules.auth.index import get_current_user_optional
+from modules.ratelimit.index import limiter_debit_ip_anonyme
 
 # Adaptateur d'entrée (driving adapter, agents.md §4) : seul fichier du
 # module Analyse qui connaît FastAPI. Traduit HTTP <-> cas d'usage `
@@ -82,7 +83,17 @@ def _generer_analyse(request: Request) -> GenererAnalyse:
     )
 
 
-@router.post("", response_model=AnalyseTermineeReponse | AnalyseEnAttenteReponse)
+@router.post(
+    "",
+    response_model=AnalyseTermineeReponse | AnalyseEnAttenteReponse,
+    # Appliqué en priorité sur cet endpoint : c'est celui qui peut coûter
+    # cher (un appel LLM par génération, G2/backlog.md). `dependencies=`
+    # (et non un paramètre de la fonction) : ce middleware ne renvoie rien
+    # d'utile à `creer_analyse`, seulement un effet de bord (lever 429) —
+    # même motif que `verifier_origine_cloud_tasks`
+    # (modules/analyse/adaptateurs/api_worker.py).
+    dependencies=[Depends(limiter_debit_ip_anonyme)],
+)
 async def creer_analyse(
     corps: AnalyseRequete,
     reponse_http: Response,
