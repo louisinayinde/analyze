@@ -438,6 +438,93 @@ def test_analyses_deux_users_distincts_ont_des_quotas_independants(client: TestC
     assert reponse.status_code in (200, 202)
 
 
+def test_analyses_message_429_identique_entre_deux_users_distincts(client: TestClient) -> None:
+    # G4 (backlog.md) : la garantie « pas de fuite du quota exact d'un
+    # autre user » (agents.md §7) ne se limite pas à l'absence d'un nombre
+    # dans le message pour *soi-même* (déjà vérifié par
+    # test_analyses_authentifie_depasse_le_quota_user_retourne_429) — elle
+    # implique aussi qu'un appelant ne peut rien déduire de l'état interne
+    # du seau d'un *autre* compte en comparant deux réponses 429. `code` et
+    # `message` viennent tous deux de `LimiteDebitDepassee` sans jamais
+    # être paramétrés par `cle`/`capacite` (shared/errors.py) : ce test fige
+    # cette garantie plutôt que de la supposer. `correlation_id` est exclu
+    # de la comparaison : il identifie la requête, pas le compte, et varie
+    # légitimement d'un appel à l'autre (shared/correlation.py).
+    premier_token = _access_token(client, email="quota.premier@example.com")
+    en_tete_premier = {"Authorization": f"Bearer {premier_token}"}
+    for i in range(20):
+        client.post(
+            "/analyses",
+            json={"texte": f"quota premier user {i}", "source_type": "autre"},
+            headers=en_tete_premier,
+        )
+    reponse_premier = client.post(
+        "/analyses",
+        json={"texte": "quota premier user epuise", "source_type": "autre"},
+        headers=en_tete_premier,
+    )
+
+    second_token = _access_token(client, email="quota.second@example.com")
+    en_tete_second = {"Authorization": f"Bearer {second_token}"}
+    for i in range(20):
+        client.post(
+            "/analyses",
+            json={"texte": f"quota second user {i}", "source_type": "autre"},
+            headers=en_tete_second,
+        )
+    reponse_second = client.post(
+        "/analyses",
+        json={"texte": "quota second user epuise", "source_type": "autre"},
+        headers=en_tete_second,
+    )
+
+    assert reponse_premier.status_code == reponse_second.status_code == 429
+    corps_premier, corps_second = reponse_premier.json(), reponse_second.json()
+    assert corps_premier["code"] == corps_second["code"]
+    assert corps_premier["message"] == corps_second["message"]
+
+
+def test_analyses_message_429_identique_entre_quota_ip_et_quota_user(
+    client: TestClient,
+) -> None:
+    # Même garantie que le test précédent, mais entre les deux politiques
+    # (G2 anonyme par IP, G3 authentifié par user_id) : un appelant ne doit
+    # pas non plus pouvoir déduire, à la lecture du message, laquelle des
+    # deux limites il a franchie ni a fortiori son seuil exact.
+    reponse_ip = None
+    en_tete_ip = {"X-Forwarded-For": "203.0.113.99"}
+    for i in range(5):
+        client.post(
+            "/analyses",
+            json={"texte": f"quota ip pour comparaison {i}", "source_type": "autre"},
+            headers=en_tete_ip,
+        )
+    reponse_ip = client.post(
+        "/analyses",
+        json={"texte": "quota ip pour comparaison epuise", "source_type": "autre"},
+        headers=en_tete_ip,
+    )
+
+    access_token = _access_token(client, email="quota.comparaison@example.com")
+    en_tete_user = {"Authorization": f"Bearer {access_token}"}
+    for i in range(20):
+        client.post(
+            "/analyses",
+            json={"texte": f"quota user pour comparaison {i}", "source_type": "autre"},
+            headers=en_tete_user,
+        )
+    reponse_user = client.post(
+        "/analyses",
+        json={"texte": "quota user pour comparaison epuise", "source_type": "autre"},
+        headers=en_tete_user,
+    )
+
+    assert reponse_ip.status_code == reponse_user.status_code == 429
+    corps_ip, corps_user = reponse_ip.json(), reponse_user.json()
+    assert corps_ip["code"] == corps_user["code"]
+    assert corps_ip["message"] == corps_user["message"]
+
+
 def test_statut_d_une_analyse_terminee_retourne_le_resultat(client: TestClient) -> None:
     creation = client.post(
         "/analyses", json={"texte": "mon profil github pour le statut", "source_type": "github"}
