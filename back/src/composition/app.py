@@ -31,6 +31,8 @@ from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.emetteur_jeton import EmetteurJetonPort
 from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
 from modules.cache.index import CacheResultatPostgres
+from modules.ratelimit.index import LimiteurDebitPostgres
+from modules.ratelimit.ports.rate_limiter import RateLimiterPort
 from shared.config import Settings, get_settings
 from shared.correlation import CorrelationIdMiddleware
 from shared.db import create_engine, create_session_factory
@@ -180,6 +182,18 @@ def _build_lifespan(
         # sessionmaker. Le use-case `GenererAnalyse` (D3) le résout via le
         # registre sans jamais importer `CacheResultatPostgres`.
         app.state.registry.register(CachePort, CacheResultatPostgres(app.state.db_sessionmaker))
+        # `RateLimiterPort` (G1, backlog.md) -> toujours `LimiteurDebitPostgres`,
+        # dev comme prod (voir sa docstring : pas de bascule dev/prod ici,
+        # contrairement à `GenerateurIAPort`/`StockageImagePort`/
+        # `FileJobsPort`). Câblé ici (et non plus haut) : dépend du même
+        # sessionmaker que les dépôts Auth et `CachePort` ci-dessus. Aucun
+        # consommateur pour l'instant (le middleware qui l'utilisera arrive
+        # en G2/G3) : câblé dès maintenant pour que G2/G3 n'aient qu'à
+        # résoudre `RateLimiterPort` depuis le registre, sans toucher à
+        # `composition/app.py`.
+        app.state.registry.register(
+            RateLimiterPort, LimiteurDebitPostgres(app.state.db_sessionmaker)
+        )
         try:
             yield
         finally:

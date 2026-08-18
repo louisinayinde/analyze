@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from modules.analyse.adaptateurs import models as _analyse_models  # noqa: F401
 from modules.auth.adaptateurs import models as _auth_models  # noqa: F401
 from modules.cache.adaptateurs import models as _cache_models  # noqa: F401
+from modules.ratelimit.adaptateurs import models as _ratelimit_models  # noqa: F401
 
 # `prepend_sys_path = src` dans alembic.ini rend ces modules importables
 # (même convention que mypy_path/ruff src dans pyproject.toml).
