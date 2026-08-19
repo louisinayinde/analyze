@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { apiClient, unwrap } from "@/shared/api";
+import { apiClient, ApiError, unwrap } from "@/shared/api";
 import type { components } from "@/shared/api";
 
 type AnalyseTerminee = components["schemas"]["AnalyseTermineeReponse"];
@@ -20,7 +20,11 @@ export type SuiviAnalyse =
   | { statut: "echec" }
   // Le poll lui-même n'a pas abouti après plusieurs tentatives (réseau,
   // timeout) — distinct de l'échec métier ci-dessus pour un message adapté.
-  | { statut: "erreur" };
+  | { statut: "erreur" }
+  // 404 : aucune analyse pour cet id (K4, lien partagé invalide/périmé).
+  // Définitif — contrairement à `erreur`, retenter n'y changera rien, donc
+  // pas de décompte de tentatives avant de s'arrêter.
+  | { statut: "introuvable" };
 
 // Suivi léger du statut d'une analyse en cours (K3, backlog.md) : poll
 // `GET /analyses/{id}/statut` à intervalle fixe tant que le statut reste
@@ -77,7 +81,12 @@ export function useSuiviAnalyse(analyseId: string | undefined): SuiviAnalyse {
             ? { statut: "terminee", analyse: resultat }
             : { statut: "echec" },
         );
-      } catch {
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          if (!monteRef.current) return;
+          setSuivi({ statut: "introuvable" });
+          return;
+        }
         tentativesErreur += 1;
         if (!monteRef.current) return;
         if (tentativesErreur >= TENTATIVES_ERREUR_MAX) {

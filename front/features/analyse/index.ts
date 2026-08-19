@@ -4,3 +4,5 @@
 
 export { useSuiviAnalyse } from "./use-suivi-analyse";
 export type { SuiviAnalyse } from "./use-suivi-analyse";
+
+export { PartageResultat } from "./partage-resultat";

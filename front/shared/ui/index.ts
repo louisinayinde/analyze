@@ -1,7 +1,7 @@
 // Surface publique du module `ui` — aucun autre module ne doit importer un
 // fichier interne (`button.tsx`, `cn.ts`, ...) directement (agents.md §4).
 
-export { Button } from "./button";
+export { Button, buttonVariants } from "./button";
 export type { ButtonProps, ButtonSize, ButtonVariant } from "./button";
 
 export { Input } from "./input";
