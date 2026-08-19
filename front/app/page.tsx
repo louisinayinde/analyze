@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient, ApiError, useApiRequest } from "@/shared/api";
 import type { components } from "@/shared/api";
+import { useSuiviAnalyse } from "@/features/analyse";
 import {
   Button,
   Card,
@@ -15,6 +16,17 @@ import {
   Spinner,
   TextArea,
 } from "@/shared/ui";
+
+// Messages engageants (K3, backlog.md) : de quoi occuper l'attente pendant
+// un cache-miss sans faire croire que quelque chose est bloqué. Rotation
+// pure UI, indépendante du polling réseau (`useSuiviAnalyse`) — l'un
+// n'attend pas l'autre.
+const MESSAGES_ATTENTE = [
+  "L'IA prépare ton roast...",
+  "Elle relit ton texte une deuxième fois, pour être sûre.",
+  "Encore quelques secondes, ça arrive.",
+];
+const ROTATION_MESSAGE_MS = 3000;
 
 type SourceAnalyse = components["schemas"]["SourceAnalyse"];
 type AnalyseReponse =
@@ -57,11 +69,40 @@ export default function Home() {
   const [sourceType, setSourceType] = useState<SourceAnalyse>("autre");
   const [erreurTexte, setErreurTexte] = useState<string>();
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
-  // Cache-miss (202) : on garde le `job_id` pour K3, qui branchera le
-  // polling `GET /analyses/{id}/statut` dessus. Tant que cet état est posé,
-  // on affiche le chargement à la place du formulaire (K2) — cache-hit
-  // (200) ne passe jamais par cet état, il redirige tout de suite.
+  // Cache-miss (202) : on garde le `job_id`, sur lequel `useSuiviAnalyse`
+  // (K3) poll `GET /analyses/{id}/statut`. Tant que cet état est posé, on
+  // affiche le chargement à la place du formulaire (K2) — cache-hit (200)
+  // ne passe jamais par cet état, il redirige tout de suite.
   const [jobIdEnAttente, setJobIdEnAttente] = useState<string>();
+
+  // K3 : tant qu'un job est en attente, ce hook poll le statut à intervalle
+  // fixe et s'arrête proprement sur `done`/`failed` (voir
+  // features/analyse/use-suivi-analyse.ts).
+  const suivi = useSuiviAnalyse(jobIdEnAttente);
+
+  const [indexMessage, setIndexMessage] = useState(0);
+  useEffect(() => {
+    if (!jobIdEnAttente || suivi.statut !== "en_cours") return;
+    const intervalle = window.setInterval(
+      () => setIndexMessage((index) => (index + 1) % MESSAGES_ATTENTE.length),
+      ROTATION_MESSAGE_MS,
+    );
+    return () => window.clearInterval(intervalle);
+  }, [jobIdEnAttente, suivi.statut]);
+
+  // Cache-miss résolu : redirection vers la page résultat (K4), dès que le
+  // statut passe à `done` — même destination que le cache-hit immédiat de
+  // `handleSubmit` ci-dessous.
+  useEffect(() => {
+    if (suivi.statut === "terminee") {
+      router.push(`/analyse/${suivi.analyse.id}`);
+    }
+  }, [suivi, router]);
+
+  function reprendreLeFormulaire() {
+    setJobIdEnAttente(undefined);
+    setIndexMessage(0);
+  }
 
   const texteEstValide = texte.trim().length > 0 && texte.length <= TEXTE_LONGUEUR_MAX;
   const texteDepasseLaLimite = texte.length > TEXTE_LONGUEUR_MAX;
@@ -83,8 +124,8 @@ export default function Home() {
 
       // Branchement cache-hit / cache-miss (K2) :
       // - cache-miss (202) : rien à montrer tout de suite, on bascule dans
-      //   l'état de chargement (`jobIdEnAttente`) — K3 y branchera le
-      //   polling `GET /analyses/{id}/statut` avec ce `job_id`.
+      //   l'état de chargement (`jobIdEnAttente`) — le polling `GET
+      //   /analyses/{id}/statut` démarre sur ce `job_id` (K3).
       // - cache-hit (200) : le résultat existe déjà, on redirige tout de
       //   suite plutôt que de faire attendre l'utilisateur pour rien.
       if (estAnalyseEnAttente(resultat)) {
@@ -106,17 +147,36 @@ export default function Home() {
     }
   }
 
-  // Cache-miss : le formulaire cède la place à l'attente — K3 remplacera ce
-  // bloc par le vrai polling (message engageant, arrêt sur done/failed) sans
-  // toucher au branchement ci-dessus.
+  // Cache-miss : le formulaire cède la place à l'attente, pilotée par
+  // `suivi` (K3). `"terminee"` ne s'affiche jamais ici : la redirection
+  // ci-dessus se déclenche avant le prochain rendu.
   if (jobIdEnAttente) {
+    if (suivi.statut === "echec" || suivi.statut === "erreur") {
+      return (
+        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-4 py-12">
+          <Card>
+            <CardContent className="flex flex-col items-center gap-4 pt-6 text-center">
+              <p role="alert" className="text-sm text-destructive">
+                {suivi.statut === "echec"
+                  ? "L'analyse n'a pas pu être générée. Réessaie dans quelques instants."
+                  : "Impossible de suivre l'avancement de ton analyse. Vérifie ta connexion et réessaie."}
+              </p>
+              <Button type="button" onClick={reprendreLeFormulaire}>
+                Réessayer
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     return (
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-4 py-12">
         <Card>
           <CardContent className="flex flex-col items-center gap-4 pt-6 text-center">
             <Spinner size="lg" />
             <p aria-live="polite" className="text-sm text-muted-foreground">
-              On génère ton analyse, ça prend quelques secondes...
+              {MESSAGES_ATTENTE[indexMessage]}
             </p>
           </CardContent>
         </Card>
