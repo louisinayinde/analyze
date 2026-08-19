@@ -36,11 +36,18 @@ export function SiteHeader() {
               </Link>
             </li>
             {status === "authenticated" && (
-              <li>
-                <Link href="/compte" className={navLinkClassName}>
-                  Mon compte
-                </Link>
-              </li>
+              <>
+                <li>
+                  <Link href="/historique" className={navLinkClassName}>
+                    Historique
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/compte" className={navLinkClassName}>
+                    Mon compte
+                  </Link>
+                </li>
+              </>
             )}
             {status === "anonymous" && (
               <li>

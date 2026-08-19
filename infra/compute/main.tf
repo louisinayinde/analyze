@@ -104,6 +104,13 @@ resource "google_cloud_tasks_queue" "jobs" {
   depends_on = [google_project_service.cloudtasks]
 }
 
+# URL publique effective de api pour le frontend (voir variables.tf,
+# api_public_url) : soit l'URI Cloud Run directe (par défaut, comportement
+# actuel), soit l'URL du Load Balancer Cloud Armor une fois L8 appliqué.
+locals {
+  api_public_url = var.api_public_url != "" ? var.api_public_url : google_cloud_run_v2_service.api.uri
+}
+
 # --- Service worker ---
 # Créé en premier des trois : `api` a besoin de son URL (WORKER_INTERNAL_URL,
 # F1) et `frontend` n'en a jamais besoin (le worker n'est jamais appelé par
@@ -279,6 +286,13 @@ resource "google_cloud_run_v2_service" "api" {
 
   deletion_protection = false # même raisonnement que le service worker ci-dessus
 
+  # Par défaut INGRESS_TRAFFIC_ALL (accès direct *.run.app, comportement
+  # actuel de L7). Une fois restrict_api_ingress=true (après apply de L8,
+  # voir variables.tf), seul le trafic interne au VPC ou passant par un Load
+  # Balancer Cloud Run est accepté — ferme l'accès direct pour que la policy
+  # Cloud Armor du module armor ne soit pas contournable.
+  ingress = var.restrict_api_ingress ? "INGRESS_TRAFFIC_INTERNAL_AND_CLOUD_LOAD_BALANCING" : "INGRESS_TRAFFIC_ALL"
+
   template {
     service_account = data.terraform_remote_state.iam.outputs.api_service_account_email
 
@@ -442,18 +456,21 @@ resource "google_cloud_run_v2_service" "frontend" {
         }
       }
 
-      # Aucune URL "interne" distincte à disposition en Cloud Run sans load
-      # balancer/VPC interne dédié (que ce produit portfolio n'a pas les
-      # moyens de payer, agents.md §2) : `api` étant déjà public
-      # (roles/run.invoker -> allUsers ci-dessus), les Route Handlers
-      # Next.js (J3) et le navigateur appellent la même URL publique.
+      # local.api_public_url : URI Cloud Run directe tant que L8 (Cloud
+      # Armor, module armor) n'a pas été appliqué, sinon l'URL du Load
+      # Balancer (voir variables.tf, api_public_url). Même valeur pour les
+      # deux : `api` étant public dans les deux cas (roles/run.invoker ->
+      # allUsers ci-dessus, ou trafic LB), les Route Handlers Next.js (J3) et
+      # le navigateur appellent la même URL — pas de load balancer/VPC
+      # interne dédié séparé pour un usage strictement interne (budget,
+      # agents.md §2).
       env {
         name  = "NEXT_PUBLIC_API_URL"
-        value = google_cloud_run_v2_service.api.uri
+        value = local.api_public_url
       }
       env {
         name  = "API_INTERNAL_URL"
-        value = google_cloud_run_v2_service.api.uri
+        value = local.api_public_url
       }
     }
   }

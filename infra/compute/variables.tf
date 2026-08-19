@@ -62,3 +62,28 @@ variable "container_image_worker" {
   type        = string
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
+
+# --- Bascule L8 (Cloud Armor) : même pattern en deux temps que frontend_url ---
+# Le module armor (L8, infra/armor/) a besoin que le service api existe déjà
+# (son NEG serverless pointe dessus par nom) : il dépend donc de ce module,
+# jamais l'inverse. Mais une fois armor appliqué, il faut fermer l'accès
+# direct *.run.app à api (sinon Cloud Armor est trivialement contournable) et
+# faire pointer le frontend sur l'URL du Load Balancer plutôt que sur l'URI
+# Cloud Run directe. Les deux valeurs par défaut ci-dessous préservent le
+# comportement actuel (accès direct, tel que déployé par L7) tant que L8 n'a
+# pas été appliqué au moins une fois — même raisonnement que frontend_url
+# vide au premier apply : un vrai cycle de dépendance (compute a besoin de la
+# sortie d'armor, armor a besoin d'une ressource de compute) qui ne se résout
+# pas dans un seul apply, donc une étape manuelle explicite plutôt qu'un
+# contournement fragile. Séquence documentée dans infra/README.md.
+variable "api_public_url" {
+  description = "URL publique du service api à exposer au frontend (NEXT_PUBLIC_API_URL/API_INTERNAL_URL). Vide par défaut -> utilise l'URI Cloud Run directe. À renseigner avec `armor.api_lb_url` (module infra/armor, sortie du second apply de L8)."
+  type        = string
+  default     = ""
+}
+
+variable "restrict_api_ingress" {
+  description = "Si true, restreint l'ingress du service api au trafic interne + Load Balancer (INGRESS_TRAFFIC_INTERNAL_AND_CLOUD_LOAD_BALANCING), fermant l'accès direct *.run.app. À activer uniquement après que le module armor (L8) a été appliqué avec succès et que api_public_url pointe vers son LB — sinon le service devient injoignable."
+  type        = bool
+  default     = false
+}

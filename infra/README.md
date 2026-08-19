@@ -32,7 +32,8 @@ infra/
 ├── storage/    # L4 — bucket GCS images + Cloud CDN
 ├── secrets/    # L5 — Secret Manager
 ├── iam/        # L6 — service accounts par service Cloud Run
-└── compute/    # L7 — Cloud Run (frontend, api, worker) + Cloud Tasks
+├── compute/    # L7 — Cloud Run (frontend, api, worker) + Cloud Tasks
+└── armor/      # L8 — Cloud Armor (WAF + rate limiting en périphérie) devant api
 ```
 
 Chaque module est un **root module Terraform indépendant** (son propre
@@ -122,8 +123,55 @@ Deux subtilités à connaître avant d'`apply` :
   fermé). Relever l'URL avec `terraform output frontend_url`, puis refaire
   `terraform apply -var frontend_url=<url>` pour ouvrir le CORS côté `api`.
 
+## Module armor (L8)
+
+Cloud Armor **ne s'attache pas directement à Cloud Run** : il faut un Load
+Balancer HTTPS externe (NEG serverless + backend service), sinon la policy
+serait trivialement contournable en appelant l'URL `*.run.app` directement.
+Scope volontairement limité à `api` (pas `frontend`) : c'est le seul service
+dont un abus coûte réellement cher (appels LLM en aval via le worker) —
+right-sizing, agents.md §2.
+
+Composants : `google_compute_security_policy` (règles préconfigurées
+`sqli-v33-stable` + `xss-v33-stable`, et une règle `rate_based_ban` qui
+throttle à 120 req/min/IP puis bannit 10 min au-delà de 300 req/5 min —
+complémentaire au rate limiting applicatif G, pas redondant : celui-ci coupe
+le flood brut avant même d'atteindre Cloud Run) ; NEG serverless + backend
+service portant la policy ; IP statique globale ; certificat Google-managed
+sur un domaine [nip.io](https://nip.io) (DNS public gratuit qui résout
+`<ip-avec-tirets>.nip.io` vers cette IP — évite d'acheter un domaine pour un
+produit portfolio, agents.md §2) ; redirection HTTP → HTTPS.
+
+**Séquence d'apply — deux temps, comme `frontend_url` (module compute)** :
+le module `armor` a besoin que le service `api` existe déjà (son NEG pointe
+dessus par nom), donc `armor` dépend de `compute`, jamais l'inverse. Mais une
+fois le LB en place, il faut fermer l'accès direct `*.run.app` à `api` (sinon
+Cloud Armor est contournable) et faire pointer le frontend sur l'URL du LB —
+ce qui dépend en retour d'une sortie d'`armor`. Un vrai cycle, résolu en deux
+applys distincts plutôt qu'un contournement fragile :
+
+```bash
+# 1. Une fois compute (L7) déployé, appliquer armor :
+cd infra/armor
+terraform init && terraform apply
+
+# 2. Relever l'URL du LB, puis rouvrir compute dessus et fermer l'accès direct :
+terraform output api_lb_url
+cd ../compute
+terraform apply -var api_public_url=<valeur de api_lb_url> -var restrict_api_ingress=true
+```
+
+Avant l'étape 2, `compute` garde son comportement L7 d'origine (accès direct
+`*.run.app`, `NEXT_PUBLIC_API_URL` = URI Cloud Run) — aucune régression tant
+que cette bascule n'est pas faite explicitement.
+
+Le certificat Google-managed prend jusqu'à ~15-60 min pour passer `ACTIVE`
+après le premier `apply` (validation asynchrone côté Google, pas un blocage
+Terraform) : normal de voir `PROVISIONING` juste après.
+
 ## À venir
 
 - **M5** ajoutera `terraform plan` obligatoire en CI sur toute PR touchant
   `infra/`, et `apply` uniquement depuis `main` après review humaine.
-- **L8** ajoutera Cloud Armor en périphérie des services `compute` (L7).
+- **O3** validera en conditions réelles que G (applicatif) et L8 (Cloud
+  Armor) se déclenchent tous les deux comme attendu.
