@@ -78,6 +78,25 @@ gcloud auth application-default set-quota-project analyze-app-prod
 (La CI utilisera Workload Identity Federation à la place — M3, pas de clé de
 service account statique.)
 
+## Référencer les outputs d'un autre module
+
+Chaque module ayant son propre état (voir plus haut), un module qui dépend
+d'un autre lit ses outputs via `terraform_remote_state` plutôt que de
+redupliquer des valeurs en dur. Exemple pour consommer le VPC créé par
+`network` (L2) depuis `database` (L3) ou `compute` (L7) :
+
+```hcl
+data "terraform_remote_state" "network" {
+  backend = "gcs"
+  config = {
+    bucket = "analyze-app-prod-tfstate"
+    prefix = "network"
+  }
+}
+
+# usage : data.terraform_remote_state.network.outputs.network_id
+```
+
 ## À venir
 
 - **M5** ajoutera `terraform plan` obligatoire en CI sur toute PR touchant
