@@ -17,8 +17,8 @@ import { getAccessToken, subscribe } from "./token-store";
 // "loading" : rafraîchissement silencieux initial en cours (au montage,
 // avant de savoir si le cookie httpOnly porte une session valide).
 // "authenticated"/"anonymous" : état stable une fois cette première
-// vérification terminée. Une future protection de route (J4, backlog.md)
-// s'appuiera sur ce statut pour ne rediriger qu'une fois "loading" écoulé —
+// vérification terminée. La protection de route (J4, `route-protegee.tsx`)
+// s'appuie sur ce statut pour ne rediriger qu'une fois "loading" écoulé —
 // jamais sur un accessToken seul, qui vaut aussi `null` pendant le chargement.
 type StatutAuth = "loading" | "authenticated" | "anonymous";
 

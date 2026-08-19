@@ -8,3 +8,4 @@
 // entrer du code serveur dans le bundle client via ce même barrel (agents.md
 // §4 : la frontière suit la contrainte réelle, pas la commodité).
 export { AuthProvider, useAuth } from "./auth-provider";
+export { RouteProtegee } from "./route-protegee";
