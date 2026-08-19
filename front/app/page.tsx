@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { apiClient, ApiError, useApiRequest } from "@/shared/api";
 import type { components } from "@/shared/api";
 import {
@@ -11,8 +12,8 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Spinner,
   TextArea,
-  useToast,
 } from "@/shared/ui";
 
 type SourceAnalyse = components["schemas"]["SourceAnalyse"];
@@ -49,13 +50,18 @@ function estAnalyseEnAttente(
 }
 
 export default function Home() {
+  const router = useRouter();
   const request = useApiRequest();
-  const { toast } = useToast();
 
   const [texte, setTexte] = useState("");
   const [sourceType, setSourceType] = useState<SourceAnalyse>("autre");
   const [erreurTexte, setErreurTexte] = useState<string>();
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
+  // Cache-miss (202) : on garde le `job_id` pour K3, qui branchera le
+  // polling `GET /analyses/{id}/statut` dessus. Tant que cet état est posé,
+  // on affiche le chargement à la place du formulaire (K2) — cache-hit
+  // (200) ne passe jamais par cet état, il redirige tout de suite.
+  const [jobIdEnAttente, setJobIdEnAttente] = useState<string>();
 
   const texteEstValide = texte.trim().length > 0 && texte.length <= TEXTE_LONGUEUR_MAX;
   const texteDepasseLaLimite = texte.length > TEXTE_LONGUEUR_MAX;
@@ -75,23 +81,16 @@ export default function Home() {
         }),
       );
 
-      // La branche ci-dessous se limite volontairement à un toast générique :
-      // le vrai branchement UX (redirection immédiate sur cache-hit, état de
-      // chargement + polling `/analyses/{id}/statut` sur cache-miss) est le
-      // sujet de K2 (Dépend de : K1, D4), qui remplacera ce toast sans
-      // toucher à la validation/au formulaire ci-dessus.
+      // Branchement cache-hit / cache-miss (K2) :
+      // - cache-miss (202) : rien à montrer tout de suite, on bascule dans
+      //   l'état de chargement (`jobIdEnAttente`) — K3 y branchera le
+      //   polling `GET /analyses/{id}/statut` avec ce `job_id`.
+      // - cache-hit (200) : le résultat existe déjà, on redirige tout de
+      //   suite plutôt que de faire attendre l'utilisateur pour rien.
       if (estAnalyseEnAttente(resultat)) {
-        toast({
-          title: "Analyse en cours",
-          description: "On génère ton résultat, ça prend quelques secondes.",
-          variant: "success",
-        });
+        setJobIdEnAttente(resultat.job_id);
       } else {
-        toast({
-          title: "Analyse prête",
-          description: "Ton résultat est disponible.",
-          variant: "success",
-        });
+        router.push(`/analyse/${resultat.id}`);
       }
       setTexte("");
     } catch (error) {
@@ -105,6 +104,24 @@ export default function Home() {
     } finally {
       setEnvoiEnCours(false);
     }
+  }
+
+  // Cache-miss : le formulaire cède la place à l'attente — K3 remplacera ce
+  // bloc par le vrai polling (message engageant, arrêt sur done/failed) sans
+  // toucher au branchement ci-dessus.
+  if (jobIdEnAttente) {
+    return (
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-4 py-12">
+        <Card>
+          <CardContent className="flex flex-col items-center gap-4 pt-6 text-center">
+            <Spinner size="lg" />
+            <p aria-live="polite" className="text-sm text-muted-foreground">
+              On génère ton analyse, ça prend quelques secondes...
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
