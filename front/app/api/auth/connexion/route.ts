@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { refreshCookieOptions, REFRESH_COOKIE_NAME } from "@/features/auth/cookie";
-import { requireInternalApiUrl } from "@/features/auth/backend-url";
+import { requireInternalApiUrl } from "@/shared/api/internal-url";
 
 // BFF (J3, backlog.md) : seul endroit qui voit le refresh token en clair
 // côté front. Le navigateur n'appelle jamais `POST /auth/connexion` du

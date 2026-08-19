@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { apiClient, ApiError, unwrap } from "@/shared/api";
-import type { components } from "@/shared/api";
+import { statutVersSuivi } from "./suivi-analyse";
+import type { SuiviAnalyse } from "./suivi-analyse";
 
-type AnalyseTerminee = components["schemas"]["AnalyseTermineeReponse"];
+export type { SuiviAnalyse };
 
 // 1,5 s : au milieu de la fourchette « 1-2 s » du ticket (K3, backlog.md).
 const INTERVALLE_POLLING_MS = 1500;
@@ -13,31 +14,33 @@ const INTERVALLE_POLLING_MS = 1500;
 // (agents.md §3 : coder pour l'échec, mais sans abandonner au premier accroc).
 const TENTATIVES_ERREUR_MAX = 3;
 
-export type SuiviAnalyse =
-  | { statut: "en_cours" }
-  | { statut: "terminee"; analyse: AnalyseTerminee }
-  // `statut: "failed"` renvoyé par le back (job de génération en échec, E4).
-  | { statut: "echec" }
-  // Le poll lui-même n'a pas abouti après plusieurs tentatives (réseau,
-  // timeout) — distinct de l'échec métier ci-dessus pour un message adapté.
-  | { statut: "erreur" }
-  // 404 : aucune analyse pour cet id (K4, lien partagé invalide/périmé).
-  // Définitif — contrairement à `erreur`, retenter n'y changera rien, donc
-  // pas de décompte de tentatives avant de s'arrêter.
-  | { statut: "introuvable" };
-
-// Suivi léger du statut d'une analyse en cours (K3, backlog.md) : poll
+// Suivi léger du statut d'une analyse (K3, backlog.md) : poll
 // `GET /analyses/{id}/statut` à intervalle fixe tant que le statut reste
 // `pending`, s'arrête proprement sur `done`/`failed`.
+//
+// `suiviInitial` (K5, backlog.md) : quand la page a déjà résolu ce statut
+// côté serveur (cas quasi systématique en pratique — voir page.tsx), on part
+// de ce résultat déjà connu au lieu de réafficher un spinner puis de relancer
+// un premier poll pour réobtenir la même chose ; le polling ne démarre que
+// si ce statut de départ est encore `en_cours`.
 //
 // `setTimeout` récursif plutôt que `setInterval` : un poll ne se replanifie
 // qu'une fois le précédent terminé, donc jamais deux requêtes en vol en
 // parallèle si le réseau ralentit — même motif que `planifierRafraichissement`
 // (features/auth/auth-provider.tsx, J3).
-export function useSuiviAnalyse(analyseId: string | undefined): SuiviAnalyse {
-  const [suivi, setSuivi] = useState<SuiviAnalyse>({ statut: "en_cours" });
+export function useSuiviAnalyse(
+  analyseId: string | undefined,
+  suiviInitial: SuiviAnalyse = { statut: "en_cours" },
+): SuiviAnalyse {
+  const [suivi, setSuivi] = useState<SuiviAnalyse>(suiviInitial);
   const minuteurRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const monteRef = useRef(true);
+  // Le tout premier montage part déjà d'un statut résolu (rendu serveur,
+  // K5, backlog.md) : inutile de relancer aussitôt un poll pour retrouver ce
+  // qu'on vient de recevoir. Ne joue qu'une fois — tout changement d'id
+  // ultérieur (nouvelle soumission depuis `/`) repart d'un poll immédiat
+  // comme avant.
+  const premierPollASauterRef = useRef(suiviInitial.statut !== "en_cours");
 
   // Réinitialise le suivi quand `analyseId` change (nouvelle soumission
   // après un échec, cf. `reprendreLeFormulaire` côté `app/page.tsx`) —
@@ -59,6 +62,10 @@ export function useSuiviAnalyse(analyseId: string | undefined): SuiviAnalyse {
 
   useEffect(() => {
     if (!analyseId) return;
+    if (premierPollASauterRef.current) {
+      premierPollASauterRef.current = false;
+      return;
+    }
 
     let tentativesErreur = 0;
 
@@ -76,11 +83,7 @@ export function useSuiviAnalyse(analyseId: string | undefined): SuiviAnalyse {
           minuteurRef.current = setTimeout(pollerUneFois, INTERVALLE_POLLING_MS);
           return;
         }
-        setSuivi(
-          resultat.statut === "done"
-            ? { statut: "terminee", analyse: resultat }
-            : { statut: "echec" },
-        );
+        setSuivi(statutVersSuivi(resultat));
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           if (!monteRef.current) return;

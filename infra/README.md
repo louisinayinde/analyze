@@ -97,9 +97,33 @@ data "terraform_remote_state" "network" {
 # usage : data.terraform_remote_state.network.outputs.network_id
 ```
 
+## Module compute (L7)
+
+Services Cloud Run `frontend`/`api`/`worker` + queue Cloud Tasks + dépôt
+Artifact Registry. Branche les service accounts du module `iam` (L6) sur
+chaque service et bascule automatiquement les adaptateurs F1
+(`FileJobsCloudTasks`)/E5 (`StockageImageGCS`) côté backend, qui n'attendaient
+que ces variables d'environnement (`composition/adapters.py`,
+`composition/app.py`) — aucun changement de code applicatif requis par ce
+module.
+
+Deux subtilités à connaître avant d'`apply` :
+
+- **Images placeholder.** M2 (build & push Docker) n'existe pas encore : les
+  trois services démarrent avec l'image publique
+  `us-docker.pkg.dev/cloudrun/container/hello` (`variables.tf`). Chaque
+  service porte un `lifecycle.ignore_changes` sur son image pour que
+  Terraform ne revienne jamais sur le vrai déploiement que M2/M4 poussera
+  plus tard hors Terraform.
+- **CORS en deux temps.** `api` a besoin de l'URL de `frontend` pour
+  restreindre `CORS_ORIGINS`, `frontend` a besoin de l'URL de `api` pour
+  l'appeler — un vrai cycle si les deux se référençaient l'un l'autre.
+  Premier `apply` : `frontend_url` reste vide (`CORS_ORIGINS=""`, défaut
+  fermé). Relever l'URL avec `terraform output frontend_url`, puis refaire
+  `terraform apply -var frontend_url=<url>` pour ouvrir le CORS côté `api`.
+
 ## À venir
 
 - **M5** ajoutera `terraform plan` obligatoire en CI sur toute PR touchant
   `infra/`, et `apply` uniquement depuis `main` après review humaine.
-- **L6** ajoutera les service accounts dédiés par service Cloud Run
-  (permissions minimales, cf. agents.md §7).
+- **L8** ajoutera Cloud Armor en périphérie des services `compute` (L7).

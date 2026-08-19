@@ -5,7 +5,7 @@ import {
   REFRESH_COOKIE_NAME,
   REFRESH_COOKIE_PATH,
 } from "@/features/auth/cookie";
-import { requireInternalApiUrl } from "@/features/auth/backend-url";
+import { requireInternalApiUrl } from "@/shared/api/internal-url";
 
 // Rafraîchissement silencieux (J3, backlog.md) : lit le refresh token dans
 // le cookie httpOnly (jamais transmis par le client — il ne le connaît

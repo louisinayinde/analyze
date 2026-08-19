@@ -1,6 +1,6 @@
-// Fichier serveur uniquement, mêmes raisons que `backend-url.ts` : jamais
-// réexporté par `index.ts`, importé uniquement par les Route Handlers sous
-// `app/api/auth/`.
+// Fichier serveur uniquement, mêmes raisons que `shared/api/internal-url.ts`
+// : jamais réexporté par `index.ts`, importé uniquement par les Route
+// Handlers sous `app/api/auth/`.
 
 export const REFRESH_COOKIE_NAME = "refresh_token";
 

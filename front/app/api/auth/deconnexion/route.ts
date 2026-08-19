@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from "@/features/auth/cookie";
-import { requireInternalApiUrl } from "@/features/auth/backend-url";
+import { requireInternalApiUrl } from "@/shared/api/internal-url";
 
 // Symétrique de connexion/refresh (J3, backlog.md) : révoque le refresh
 // token courant côté back puis efface le cookie. Le cookie est toujours
