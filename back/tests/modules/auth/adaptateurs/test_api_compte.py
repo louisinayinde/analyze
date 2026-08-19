@@ -41,6 +41,32 @@ def _access_token(client: TestClient, email: str) -> str:
     return access_token
 
 
+def test_consultation_sans_authentification_retourne_401(client: TestClient) -> None:
+    reponse = client.get("/compte")
+
+    assert reponse.status_code == 401
+    assert reponse.json()["code"] == "non_authentifie"
+
+
+def test_consultation_avec_jeton_invalide_retourne_401(client: TestClient) -> None:
+    reponse = client.get("/compte", headers={"Authorization": "Bearer pas-un-jwt"})
+
+    assert reponse.status_code == 401
+
+
+def test_consultation_nominale_retourne_les_infos_du_compte(client: TestClient) -> None:
+    access_token = _access_token(client, "consulte@example.com")
+
+    reponse = client.get("/compte", headers={"Authorization": f"Bearer {access_token}"})
+
+    assert reponse.status_code == 200
+    corps = reponse.json()
+    assert corps["email"] == "consulte@example.com"
+    assert "password_hash" not in corps
+    assert "id" in corps
+    assert "created_at" in corps
+
+
 def test_suppression_sans_authentification_retourne_401(client: TestClient) -> None:
     reponse = client.request("DELETE", "/compte", json={"mot_de_passe": MOT_DE_PASSE_ROBUSTE})
 

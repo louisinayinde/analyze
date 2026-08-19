@@ -67,6 +67,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<StatutAuth>("loading");
   const minuteurRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const tenteRef = useRef(false);
+  // Reflète le montage *courant*, contrairement à un `let annule = false`
+  // capturé dans la fermeture du seul appel réseau (voir plus bas pourquoi
+  // ce dernier ne suffit pas sous StrictMode) : remis à `true` à chaque
+  // (re)montage, y compris le remontage StrictMode qui suit le montage
+  // initial.
+  const monteRef = useRef(true);
 
   // Restaure une session existante au montage (rechargement de page, nouvel
   // onglet) : le seul indice disponible côté client est le cookie httpOnly,
@@ -79,13 +85,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // (la rotation ne s'applique qu'à la réponse du premier) — le second
   // serait détecté comme un rejeu (C6) et révoquerait toute la famille de
   // jetons dès le premier chargement de page.
+  //
+  // `monteRef`, volontairement distinct de `tenteRef`, vit dans un second
+  // effet inconditionnel : sous StrictMode, le cycle est montage → nettoyage
+  // → remontage. Si la garde d'annulation avait été un simple
+  // `let annule = false` local à *l'effet gardé par `tenteRef`* (comme dans
+  // une première version de ce fichier), son nettoyage — déclenché par le
+  // remontage StrictMode — l'aurait mis à `true` pour de bon : ce même
+  // effet ne se rejoue jamais ensuite (`tenteRef.current` déjà vrai), donc
+  // rien ne l'aurait jamais remis à `false`, et la réponse de `rafraichir()`
+  // — même reçue plus tard, une fois l'app durablement montée — aurait
+  // toujours été ignorée. `status` restait bloqué sur `"loading"` pour
+  // toujours en dev, empêchant `RouteProtegee` (J4) de jamais rediriger un
+  // visiteur anonyme arrivant directement sur une route protégée. En
+  // isolant l'indicateur de montage dans un effet séparé, inconditionnel,
+  // il est remis à `true` au remontage StrictMode, donc correct au moment
+  // où la promesse (créée pendant le tout premier montage) se résout.
+  useEffect(() => {
+    monteRef.current = true;
+    return () => {
+      monteRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (tenteRef.current) return;
     tenteRef.current = true;
 
-    let annule = false;
     rafraichir().then((resultat) => {
-      if (annule) return;
+      if (!monteRef.current) return;
       if (resultat.data) {
         setStatus("authenticated");
         planifierRafraichissement(resultat.data.expiresIn, minuteurRef, setStatus);
@@ -94,7 +122,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
     return () => {
-      annule = true;
       // Lit volontairement la valeur *courante* de la ref, pas une copie
       // capturée au montage : `login` peut avoir replanifié un minuteur plus
       // récent entre-temps, c'est celui-là qu'il faut annuler.

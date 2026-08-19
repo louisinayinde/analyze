@@ -1,13 +1,15 @@
 import logging
 import uuid
+from typing import cast
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict
 
-from modules.auth.adaptateurs.api import get_current_user
+from modules.auth.adaptateurs.api import UtilisateurReponse, get_current_user
 from modules.auth.application.supprimer_compte import SupprimerCompte
 from modules.auth.ports.depot_utilisateur import DépôtUtilisateurPort
 from modules.auth.ports.hacheur_mot_de_passe import HacheurMotDePassePort
+from shared.errors import NonAuthentifie
 from shared.openapi import responses_erreur
 
 # Adaptateur d'entrée distinct de `adaptateurs/api.py` (H3, agents.md §4) :
@@ -37,6 +39,45 @@ def _supprimer_compte(request: Request) -> SupprimerCompte:
         depot=registry.resolve(DépôtUtilisateurPort),
         hacheur=registry.resolve(HacheurMotDePassePort),
     )
+
+
+def _depot_utilisateur(request: Request) -> DépôtUtilisateurPort:
+    # `cast`, pas juste `return registry.resolve(...)` : même motif que
+    # `_emetteur_jeton` (modules/auth/adaptateurs/api.py) — ici le port est
+    # utilisé directement par la route, sans passer par un use-case dont le
+    # constructeur typé infèrerait le retour à la place de mypy.
+    return cast(DépôtUtilisateurPort, request.app.state.registry.resolve(DépôtUtilisateurPort))
+
+
+@router.get(
+    "",
+    response_model=UtilisateurReponse,
+    summary="Consulter son compte",
+    response_description="Infos du compte de l'appelant authentifié.",
+    responses=responses_erreur(
+        (
+            401,
+            "non_authentifie",
+            "Authentification requise.",
+            "Aucun jeton présenté, jeton invalide/expiré, ou compte déjà supprimé.",
+        ),
+    ),
+)
+async def consulter_compte(
+    depot: DépôtUtilisateurPort = Depends(_depot_utilisateur),
+    user_id: uuid.UUID = Depends(get_current_user),
+) -> UtilisateurReponse:
+    # `user_id` vient exclusivement du JWT (`get_current_user`, C7), même
+    # posture que `supprimer_compte` juste en dessous : impossible de
+    # consulter le compte de quelqu'un d'autre depuis cette route.
+    utilisateur = await depot.trouver_par_id(user_id)
+    if utilisateur is None:
+        # Cas limite (compte supprimé entre l'émission du JWT et cette
+        # requête) : même exception que `SupprimerCompte.executer`
+        # (application/supprimer_compte.py) — pas de canal distinct pour ce
+        # cas plutôt qu'un jeton simplement expiré (agents.md §7).
+        raise NonAuthentifie("Authentification requise.")
+    return UtilisateurReponse.depuis_domaine(utilisateur)
 
 
 @router.delete(

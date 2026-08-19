@@ -21,7 +21,23 @@ import { useAuth } from "./auth-provider";
 // place côté back (`get_current_user`, C7) sur chaque endpoint concerné
 // (H3, `/historique` et `/compte`) : même si ce composant était contourné
 // ou son JS désactivé, aucune donnée ne fuiterait.
-export function RouteProtegee({ children }: { children: React.ReactNode }) {
+export function RouteProtegee({
+  children,
+  suspendreRedirection = false,
+}: {
+  children: React.ReactNode;
+  // Pour l'appelant qui déclenche lui-même un `logout()` puis une
+  // navigation explicite vers une destination *autre* que /connexion (J5,
+  // suppression de compte → doit atterrir sur "/") : sans ce drapeau,
+  // `status` passe à "anonymous" pendant que ce composant est encore monté,
+  // et cette redirection entre en course avec le `router.push` de
+  // l'appelant — l'ordre d'arrivée des deux navigations n'est pas garanti
+  // (`setStatus` dans `auth-provider.tsx` déclenche un re-render dont le
+  // timing par rapport à la suite du `handleSubmit` appelant n'est pas
+  // spécifié). Positionner ce drapeau *avant* le `logout()` supprime la
+  // course au lieu de tenter de la gagner.
+  suspendreRedirection?: boolean;
+}) {
   const { status } = useAuth();
   const router = useRouter();
 
@@ -30,10 +46,10 @@ export function RouteProtegee({ children }: { children: React.ReactNode }) {
     // l'historique de navigation après une redirection vers /connexion —
     // sinon le bouton "précédent" ramène sur un écran qui se re-redirige
     // aussitôt.
-    if (status === "anonymous") {
+    if (status === "anonymous" && !suspendreRedirection) {
       router.replace("/connexion");
     }
-  }, [status, router]);
+  }, [status, router, suspendreRedirection]);
 
   // "loading" : le rafraîchissement silencieux initial (J3) n'a pas encore
   // tranché. "anonymous" : la redirection ci-dessus vient d'être déclenchée

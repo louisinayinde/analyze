@@ -83,6 +83,15 @@ export async function unwrap<T>(
     );
   }
 
+  // `204 No Content` : `data` vaut légitimement `undefined` en cas de succès
+  // (aucun corps à parser) — openapi-fetch ne le distingue pas autrement
+  // d'un corps manquant à tort (voir `coreFetch`, openapi-fetch/src/index.js).
+  // Même traitement que `appeler()` (features/auth/auth-client.ts) pour ce
+  // même statut, côté Route Handler.
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   if (data === undefined) {
     throw new ApiError(
       "Réponse vide inattendue du serveur.",

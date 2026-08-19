@@ -19,3 +19,17 @@ back/data/
 # secrets locaux — ne jamais committer
 .env
 .env.local
+
+# Terraform (infra/) — état, plans et cache locaux, jamais committés
+# (peuvent contenir des valeurs sensibles). Le .terraform.lock.hcl, lui,
+# EST committé (pins les versions de provider, comme un lockfile npm).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

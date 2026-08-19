@@ -113,7 +113,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Consulter son compte */
+        get: operations["consulter_compte_compte_get"];
         put?: never;
         post?: never;
         /** Supprimer son compte */
@@ -719,6 +720,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consulter_compte_compte_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Infos du compte de l'appelant authentifié. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UtilisateurReponse"];
+                };
+            };
+            /** @description Aucun jeton présenté, jeton invalide/expiré, ou compte déjà supprimé. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "code": "non_authentifie",
+                     *       "correlation_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                     *       "message": "Authentification requise."
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErreurAPI"];
                 };
             };
         };
